@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ModelAction",
+  "oneOf": [
+    {"type": "object", "additionalProperties": false, "required": ["type"], "properties": {"type": {"const": "finish"}}},
+    {"type": "object", "additionalProperties": false, "required": ["type", "tool", "arguments"], "properties": {"type": {"const": "tool_request"}, "tool": {"type": "string", "minLength": 1, "maxLength": 64}, "arguments": {"type": "object", "maxProperties": 4}}}
+  ]
+}

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="AgenticDef: bounded, read-only, evidence-grounded security investigation. An executable local proof with eight replay scenarios.">
+  <meta name="color-scheme" content="dark">
+  <title>AgenticDef — Evidence before action</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header>
+    <a class="brand" href="#main"><span class="mark" aria-hidden="true">A/D</span> AgenticDef</a>
+    <nav aria-label="Main navigation"><a href="#architecture">Architecture</a><a href="#proof">The proof</a><a href="https://github.com/trionnemesis/AgenticDef/blob/main/README.zh-TW.md" lang="zh-Hant">繁體中文</a><a class="repo" href="https://github.com/trionnemesis/AgenticDef">GitHub ↗</a></nav>
+  </header>
+  <main id="main">
+    <section class="hero">
+      <div class="eyebrow"><span class="dot"></span> EXPERIMENTAL v0.2.0 · LOCAL INVESTIGATION CORE</div>
+      <h1>Evidence before action.<br><span>Boundaries before AI.</span></h1>
+      <p class="lead">A security event starts an investigation. The model proposes the next question. Deterministic code decides what it is allowed to ask.</p>
+      <p class="zh" lang="zh-Hant">事件觸發調查。模型提出問題，程式碼守住權限、預算與證據邊界。</p>
+      <div class="actions"><a class="button" href="#start">Run the local proof <span aria-hidden="true">→</span></a><a class="secondary" href="https://github.com/trionnemesis/AgenticDef/blob/main/SPEC-v0.2.md">Read the specification ↗</a></div>
+      <div class="metrics"><div><strong>4</strong><span>read-only capabilities</span></div><div><strong>8</strong><span>replay scenarios</span></div><div><strong>6</strong><span>acceptance gates</span></div><div><strong>0</strong><span>infrastructure write tools</span></div></div>
+    </section>
+    <section id="architecture">
+      <div class="section-heading"><div><p class="eyebrow">01 / THE AUTHORITY BOUNDARY</p><h2>The model proposes.<br>The runtime permits.</h2></div><p>Policy is never a prompt suggestion. Every model request passes a fixed registry, exact resource scope and a pre-call budget.</p></div>
+      <div class="architecture">
+        <div class="arch"><span>01</span><h3>Event &amp; policy</h3><p>Validate. Claim once.<br>Load trusted limits.</p></div>
+        <div class="arch"><span>02</span><h3>Bounded reasoning</h3><p>Propose a typed action.<br>Reserve before calling.</p></div>
+        <div class="arch"><span>03</span><h3>Read-only evidence</h3><p>Allowlisted reads only.<br>Hash and persist evidence.</p></div>
+        <div class="arch"><span>04</span><h3>Grounded result</h3><p>Validate every reference.<br>Persist. Terminate.</p></div>
+      </div>
+      <div class="boundary"><span aria-hidden="true">⊘</span><p>No shell. No arbitrary HTTP or SQL. No kubectl passthrough. No remediation. Evidence text cannot grant new authority.</p></div>
+    </section>
+    <section id="proof">
+      <div class="section-heading"><div><p class="eyebrow">02 / EXECUTABLE ACCEPTANCE</p><h2>A failed investigation<br>can prove a control works.</h2></div><p>A replay passes when the expected boundary holds. That does not mean a real environment is secure.</p></div>
+      <div class="table-wrap"><table><caption>Eight synthetic scenarios and their expected outcomes</caption><thead><tr><th scope="col">Scenario</th><th scope="col">Boundary exercised</th><th scope="col">Expected investigation</th></tr></thead><tbody>
+        <tr><th scope="row">S01</th><td>Privilege increase without approval</td><td><span class="status suspicious">Confirmed suspicious</span></td></tr>
+        <tr><th scope="row">S02</th><td>Approval matches actor, resource and change</td><td><span class="status benign">Likely benign</span></td></tr>
+        <tr><th scope="row">S03</th><td>Required evidence is unavailable</td><td><span class="status unknown">Insufficient evidence</span></td></tr>
+        <tr><th scope="row">S04</th><td>Injection text + simulated hostile action</td><td><span class="status blocked">Investigation failed safely</span></td></tr>
+        <tr><th scope="row">S05</th><td>Duplicate delivery</td><td><span class="status benign">Existing result, no extra calls</span></td></tr>
+        <tr><th scope="row">S06</th><td>Hard budget exhausted</td><td><span class="status unknown">Inconclusive</span></td></tr>
+        <tr><th scope="row">S07</th><td>Unregistered capability requested</td><td><span class="status blocked">Investigation failed safely</span></td></tr>
+        <tr><th scope="row">S08</th><td>Finding cites nonexistent evidence</td><td><span class="status blocked">Investigation failed safely</span></td></tr>
+      </tbody></table></div>
+    </section>
+    <section id="start" class="start">
+      <div><p class="eyebrow">03 / START LOCALLY</p><h2>One checkout.<br>No cloud credentials.</h2><p>Python 3.11+. Install dependencies once, then run every replay offline. Inspect the persisted evidence and audit alongside the result.</p><a class="secondary" href="https://github.com/trionnemesis/AgenticDef/blob/main/README.md#quick-start">Full setup and exit codes ↗</a></div>
+      <div class="terminal"><div class="terminal-bar"><span></span><span></span><span></span><p>agenticdef / quick start</p></div><pre><code>git clone https://github.com/trionnemesis/AgenticDef.git
+cd AgenticDef
+python -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev,anthropic]'
+python -m pytest -q
+replay scenarios --all</code></pre><p class="terminal-note">Output: explicit statuses, evidence references, budgets and terminal state.</p></div>
+    </section>
+    <section class="limits">
+      <p class="eyebrow">04 / HONEST STATUS</p><h2>Proof you can inspect.<br>Limits you can see.</h2>
+      <div class="cards"><article><span class="small-label">EXERCISED OFFLINE</span><h3>Replay &amp; control boundaries</h3><p>Contracts, scope, grounding, budgets, cancellation, duplicate claims and HTTP adapter behavior have executable regression tests.</p><a href="https://github.com/trionnemesis/AgenticDef/actions/workflows/ci.yml">Inspect CI and artifacts ↗</a></article><article><span class="small-label amber">NOT LIVE-VALIDATED</span><h3>Real model accuracy</h3><p>The Anthropic adapter is tested with mock transport. Actual API calls, model behavior on hostile evidence and live detection accuracy remain unverified.</p><a href="https://github.com/trionnemesis/AgenticDef/blob/main/docs/model-adapter.md">Read the validation boundary ↗</a></article><article><span class="small-label muted">OUT OF v0.2 SCOPE</span><h3>Cloud &amp; remediation</h3><p>No GKE dispatch, live cluster evidence, production SOC, multi-agent orchestration or infrastructure mutation is implemented.</p><a href="https://github.com/trionnemesis/AgenticDef/blob/main/DESIGN-v0.2.md">Explore the architecture ↗</a></article></div>
+    </section>
+  </main>
+  <footer><a class="brand" href="#main">AgenticDef</a><p>A model can ask. It cannot authorize itself.</p><a href="https://github.com/trionnemesis/AgenticDef/blob/main/LICENSE">MIT License</a></footer>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "fault": {
+    "after_evidence": 0,
+    "action": {
+      "type": "tool_request",
+      "tool": "arbitrary_http",
+      "arguments": {
+        "url": "https://example.invalid"
+      }
+    }
+  }
+}

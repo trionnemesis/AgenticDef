@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Evidence", "type": "object", "additionalProperties": false,
+  "required": ["evidence_id", "source", "observed_at", "acquired_at", "method", "content_ref", "summary", "integrity"],
+  "properties": {
+    "evidence_id": {"type": "string", "pattern": "^ev-[a-f0-9]{64}$"},
+    "source": {"type": "string", "minLength": 1, "maxLength": 256},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "acquired_at": {"type": "string", "format": "date-time"},
+    "method": {"enum": ["get_change_event", "get_rbac_object", "get_subject_bindings", "get_approval_record"]},
+    "content_ref": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "summary": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "integrity": {"type": "object", "additionalProperties": false, "required": ["algorithm", "digest"], "properties": {"algorithm": {"const": "sha256"}, "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}}
+  }
+}

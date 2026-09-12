@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agenticdef"
+version = "0.2.0"
+description = "Bounded, read-only, evidence-grounded security investigation"
+requires-python = ">=3.11"
+license = "MIT"
+readme = "README.md"
+dependencies = ["jsonschema>=4.23,<5", "rfc3339-validator>=0.1.4,<0.2", "PyYAML>=6.0.2,<7"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "build>=1.2,<2"]
+anthropic = ["httpx>=0.28,<0.29"]
+
+[project.scripts]
+replay = "agenticdef.cli:main"
+agenticdef = "agenticdef.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+agenticdef = ["contracts/*.json"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

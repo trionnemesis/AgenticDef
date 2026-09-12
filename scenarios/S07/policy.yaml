@@ -1,0 +1,38 @@
+{
+  "policy_version": "v0.2",
+  "allowed_tools": [
+    "get_change_event",
+    "get_rbac_object",
+    "get_subject_bindings",
+    "get_approval_record"
+  ],
+  "resource_scope": {
+    "event_ids": [
+      "evt-S07"
+    ],
+    "rbac_objects": [
+      {
+        "kind": "ClusterRole",
+        "namespace": "",
+        "name": "release-operator",
+        "version": "1"
+      },
+      {
+        "kind": "ClusterRole",
+        "namespace": "",
+        "name": "release-operator",
+        "version": "2"
+      }
+    ],
+    "subject_ids": [
+      "serviceaccount:ops:deployer"
+    ],
+    "change_ids": [
+      "chg-S07"
+    ]
+  },
+  "max_runtime_seconds": 10,
+  "max_model_calls": 16,
+  "max_tool_calls": 12,
+  "max_evidence_items": 8
+}

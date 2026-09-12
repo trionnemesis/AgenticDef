@@ -1,0 +1,112 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agenticdef-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Contracts and replay / 契約與重播 (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install / 安裝
+        run: |
+          python -m pip install -r requirements-dev.lock
+          python -m pip install --no-deps -e .
+      - name: Tests and replay / 測試與重播
+        run: |
+          python -m pytest -q --junitxml=results/junit.xml
+          replay scenarios --all --output results/replay > results/replay.json
+          python -m build
+      - name: Install wheel outside checkout / 驗證獨立安裝
+        run: |
+          python -m venv /tmp/agenticdef-wheel
+          /tmp/agenticdef-wheel/bin/pip install dist/*.whl
+          cd /tmp
+          /tmp/agenticdef-wheel/bin/replay "$GITHUB_WORKSPACE/scenarios" --all
+      - name: Preserve evidence / 保留驗收證據
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: acceptance-python-${{ matrix.python }}
+          path: results/
+          if-no-files-found: error
+
+  pages:
+    name: Publish documentation / 發布文件
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: site
+      - name: Deploy Pages / 部署文件站
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+
+  release:
+    name: First v0.2.0 release / 首次版本發布
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Build verified distribution / 建立發布套件
+        run: |
+          python -m pip install -r requirements-dev.lock
+          python -m pip install --no-deps -e .
+          python -m build
+          replay scenarios --all > dist/replay-summary.json
+          cd dist
+          sha256sum *.whl *.tar.gz replay-summary.json > SHA256SUMS
+      - name: Create release without overwriting / 建立版本且不覆寫
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.sha }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view v0.2.0 >/dev/null 2>&1; then
+            echo 'Release exists; unchanged / 版本已存在，保留原狀'
+          else
+            gh release create v0.2.0 dist/*.whl dist/*.tar.gz dist/SHA256SUMS dist/replay-summary.json --target "$RELEASE_SHA" --title 'AgenticDef v0.2.0' --notes-file docs/release-v0.2.0.md
+          fi

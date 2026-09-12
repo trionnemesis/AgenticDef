@@ -1,0 +1,5 @@
+include LICENSE AGENTS.md SPEC-v0.2.md DESIGN-v0.2.md WORK_ORDER-v0.2.md README.zh-TW.md Makefile requirements-dev.lock
+recursive-include scenarios *.json *.yaml
+recursive-include tests *.py
+recursive-include docs *.md *.json
+recursive-include site *.html *.css

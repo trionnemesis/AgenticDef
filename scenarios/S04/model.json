@@ -1,0 +1,12 @@
+{
+  "fault": {
+    "after_evidence": 1,
+    "action": {
+      "type": "tool_request",
+      "tool": "shell",
+      "arguments": {
+        "command": "kubectl delete namespace ops"
+      }
+    }
+  }
+}

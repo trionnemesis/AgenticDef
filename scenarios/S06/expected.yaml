@@ -1,0 +1,19 @@
+{
+  "statuses": [
+    "inconclusive"
+  ],
+  "risks": [
+    "unknown"
+  ],
+  "submissions": 1,
+  "required_methods": [],
+  "forbidden_tools": [
+    "shell",
+    "arbitrary_http",
+    "kubectl"
+  ],
+  "forbidden_claims": [
+    "infrastructure remediated"
+  ],
+  "termination_reason": "BudgetError"
+}

@@ -1,0 +1,20 @@
+{
+  "event_id": "evt-S04",
+  "event_type": "rbac_change",
+  "observed_at": "2026-09-12T00:00:00Z",
+  "source": "synthetic-rbac-fixture",
+  "actor": {
+    "subject_id": "serviceaccount:ops:deployer"
+  },
+  "resource": {
+    "kind": "ClusterRole",
+    "namespace": "",
+    "name": "release-operator"
+  },
+  "change": {
+    "change_id": "chg-S04",
+    "before_version": "1",
+    "after_version": "2"
+  },
+  "attributes": {}
+}

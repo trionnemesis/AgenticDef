@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InvestigationResult", "type": "object", "additionalProperties": false,
+  "required": ["investigation_id", "event_id", "status", "risk", "summary", "findings", "missing_evidence", "recommended_next_actions", "budget_usage", "termination_reason", "timestamps"],
+  "properties": {
+    "investigation_id": {"type": "string", "pattern": "^inv-[a-f0-9]{64}$"},
+    "event_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "status": {"$ref": "draft.schema.json#/properties/status"},
+    "risk": {"$ref": "draft.schema.json#/properties/risk"},
+    "summary": {"$ref": "draft.schema.json#/properties/summary"},
+    "findings": {"$ref": "draft.schema.json#/properties/findings"},
+    "missing_evidence": {"$ref": "draft.schema.json#/properties/missing_evidence"},
+    "recommended_next_actions": {"$ref": "draft.schema.json#/properties/recommended_next_actions"},
+    "budget_usage": {"type": "object", "additionalProperties": false, "required": ["model_calls", "tool_calls", "evidence_items", "runtime_seconds"], "properties": {"model_calls": {"type": "integer", "minimum": 0}, "tool_calls": {"type": "integer", "minimum": 0}, "evidence_items": {"type": "integer", "minimum": 0}, "runtime_seconds": {"type": "number", "minimum": 0}}},
+    "termination_reason": {"type": "string", "minLength": 1, "maxLength": 256},
+    "timestamps": {"type": "object", "additionalProperties": false, "required": ["started_at", "finished_at"], "properties": {"started_at": {"type": "string", "format": "date-time"}, "finished_at": {"type": "string", "format": "date-time"}}}
+  }
+}

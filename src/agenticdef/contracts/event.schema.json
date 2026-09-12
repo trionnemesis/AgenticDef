@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SecurityEvent", "type": "object", "additionalProperties": false,
+  "required": ["event_id", "event_type", "observed_at", "source", "actor", "resource", "change", "attributes"],
+  "properties": {
+    "event_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "event_type": {"const": "rbac_change"},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "source": {"type": "string", "minLength": 1, "maxLength": 256},
+    "actor": {"type": "object", "additionalProperties": false, "required": ["subject_id"], "properties": {"subject_id": {"type": "string", "minLength": 1, "maxLength": 128}}},
+    "resource": {"$ref": "#/$defs/resource"},
+    "change": {"type": "object", "additionalProperties": false, "required": ["change_id", "before_version", "after_version"], "properties": {"change_id": {"type": "string", "minLength": 1, "maxLength": 128}, "before_version": {"type": "string", "minLength": 1, "maxLength": 128}, "after_version": {"type": "string", "minLength": 1, "maxLength": 128}}},
+    "attributes": {"type": "object", "maxProperties": 32}
+  },
+  "$defs": {"resource": {"type": "object", "additionalProperties": false, "required": ["kind", "namespace", "name"], "properties": {"kind": {"enum": ["Role", "ClusterRole"]}, "namespace": {"type": "string", "maxLength": 128}, "name": {"type": "string", "minLength": 1, "maxLength": 128}}}}
+}

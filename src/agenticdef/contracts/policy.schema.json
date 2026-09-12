@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InvestigationPolicy", "type": "object", "additionalProperties": false,
+  "required": ["policy_version", "allowed_tools", "resource_scope", "max_runtime_seconds", "max_model_calls", "max_tool_calls", "max_evidence_items"],
+  "properties": {
+    "policy_version": {"type": "string", "minLength": 1, "maxLength": 128},
+    "allowed_tools": {"type": "array", "uniqueItems": true, "maxItems": 4, "items": {"enum": ["get_change_event", "get_rbac_object", "get_subject_bindings", "get_approval_record"]}},
+    "resource_scope": {"type": "object", "additionalProperties": false, "required": ["event_ids", "rbac_objects", "subject_ids", "change_ids"], "properties": {
+      "event_ids": {"$ref": "#/$defs/ids"}, "subject_ids": {"$ref": "#/$defs/ids"}, "change_ids": {"$ref": "#/$defs/ids"},
+      "rbac_objects": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"type": "object", "additionalProperties": false, "required": ["kind", "namespace", "name", "version"], "properties": {"kind": {"enum": ["Role", "ClusterRole"]}, "namespace": {"type": "string", "maxLength": 128}, "name": {"$ref": "#/$defs/id"}, "version": {"$ref": "#/$defs/id"}}}}
+    }},
+    "max_runtime_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 300},
+    "max_model_calls": {"type": "integer", "minimum": 0, "maximum": 64},
+    "max_tool_calls": {"type": "integer", "minimum": 0, "maximum": 64},
+    "max_evidence_items": {"type": "integer", "minimum": 0, "maximum": 64}
+  },
+  "$defs": {"id": {"type": "string", "minLength": 1, "maxLength": 128}, "ids": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}}
+}
