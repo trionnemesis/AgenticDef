@@ -139,7 +139,7 @@ CI runs the full tests and offline replay on Python 3.11 and 3.12, builds the di
 
 ## Status
 
-**Experimental v0.2.0 implementation.** M0–M5 replay and regression checks have run locally. M6's real provider adapter has offline protocol and shared-core integration tests; an actual Anthropic API call has **not** been validated in this delivery. Cloud ingestion, live GKE evidence, production operation and remediation are not implemented. [Verification](docs/verification.md) separates these boundaries.
+**Experimental v0.2.1 source.** The [patch notes](docs/release-v0.2.1.md) cover terminal failure for an evidence adapter missing a callable required tool; GitHub Releases records published versions. M0–M5 replay and regression checks have run locally. M6's real provider adapter has offline protocol and shared-core integration tests; an actual Anthropic API call has **not** been validated in this delivery. Cloud ingestion, live GKE evidence, production operation and remediation are not implemented. [Verification](docs/verification.md) separates these boundaries.
 
 The supplied [SPEC](SPEC-v0.2.md), [DESIGN](DESIGN-v0.2.md), [WORK ORDER](WORK_ORDER-v0.2.md), and [AGENTS](AGENTS.md) are preserved. Implementation choices for unspecified fields are recorded in [ADR 0001](docs/adr-0001.md).
 

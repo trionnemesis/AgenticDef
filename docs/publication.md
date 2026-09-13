@@ -15,3 +15,8 @@ The intended URL is `https://trionnemesis.github.io/AgenticDef/`. A successful w
 The release job builds wheel and source distribution, computes SHA-256 checksums and creates v0.2.0 at the exact tested commit using the job's scoped `GITHUB_TOKEN`. It attaches the distributions, checksums and replay summary, and uses [v0.2.0 notes](release-v0.2.0.md). It never overwrites an existing release or force-moves a tag. No personal token is required.
 
 Subsequent commits continue running CI and Pages. A new product release needs a deliberate version/notes change; it is not automatically inferred from every commit. A permission/setup failure remains visible in Actions and is not bypassed with alternate credentials.
+
+The v0.2.1 source bump and [patch notes](release-v0.2.1.md) prepare the next
+patch; they do not publish it. The first-release workflow still targets
+v0.2.0 and is unchanged. Publishing v0.2.1 is a separate maintainer action
+against the tested merge commit; retain v0.2.0 and its assets as published.

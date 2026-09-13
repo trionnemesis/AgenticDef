@@ -6,7 +6,7 @@ from ..domain.contracts import canonical, validate
 from ..domain.errors import (BudgetError, ContractError, GroundingError, InvestigationError,
                              ModelError, PersistenceError, PolicyError, ToolExecutionError)
 from ..domain.evidence import Ledger, validate_grounding
-from ..domain.runtime import Budget, Policy, TERMINAL, identity, transition
+from ..domain.runtime import Budget, Policy, TERMINAL, TOOL_ARGUMENTS, identity, transition
 
 STATUS_STATE = {"confirmed_suspicious": "COMPLETED", "likely_benign": "COMPLETED",
                 "insufficient_evidence": "INSUFFICIENT_EVIDENCE", "inconclusive": "INCONCLUSIVE",
@@ -82,12 +82,15 @@ class Investigator:
             if not self.policy.admits_event(event["event_id"]):
                 raise PolicyError("Event outside trusted scope")
             move("INVESTIGATING")
-            dispatch = {
-                "get_change_event": self.tools.get_change_event,
-                "get_rbac_object": self.tools.get_rbac_object,
-                "get_subject_bindings": self.tools.get_subject_bindings,
-                "get_approval_record": self.tools.get_approval_record,
-            }
+            # Validate the fixed evidence port before any provider call. Adapter
+            # wiring errors must reach the typed, persisted failure path.
+            dispatch = {}
+            for tool in TOOL_ARGUMENTS:
+                operation = getattr(self.tools, tool, None)
+                if not callable(operation):
+                    audit("adapter_rejected", tool=tool, error="ContractError")
+                    raise ContractError("Evidence adapter requires callable tool / 證據提供者缺少可呼叫工具: " + tool)
+                dispatch[tool] = operation
             while True:
                 ctx = context()
                 action = await call("model_calls", lambda: self.model.choose_action(ctx, self.policy.allowed_tools), "choose_action")

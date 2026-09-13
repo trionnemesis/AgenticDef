@@ -7,13 +7,21 @@ The source of truth is the [CI run](https://github.com/trionnemesis/AgenticDef/a
 | A — contracts | Valid events/policies/results/evidence; invalid dates, tools, statuses, references and extra fields rejected |
 | B — authority | Registry/scope rejection before adapter execution; untrusted policy fields cannot grant shell; same check for HTTP model responses |
 | C — grounding | S08 rejects fabricated IDs; incomplete conclusive findings rejected; evidence body/request digests verified |
-| D — termination | All four budgets; synthesis counted; active model/tool cancellation; terminal records reject subsequent work |
+| D — termination | All four budgets; synthesis counted; active model/tool cancellation; missing/non-callable evidence methods persist a failed terminal result before provider calls; terminal records reject subsequent work |
 | E — replay | S01–S08 run locally without cloud credentials; structural status/risk/reason/method/forbidden-action assertions |
-| F — idempotency | Repeated completed events return identical records; concurrent claim has one winner; crashed claim stays bounded |
+| F — idempotency | Repeated completed or adapter-contract-failed events return identical records without calls or writes; concurrent claim has one winner; crashed claim stays bounded |
 
 Local development ran the contract gate before deterministic primitives, then the full replay before the real-provider adapter. Test results and the final test count are available in CI/JUnit rather than a manually maintained badge.
 
 ## Truthful completion boundary
+
+The v0.2.1 regression `test_invalid_evidence_adapter_persists_failed_result`
+removes or replaces each of the four required evidence methods with `None`.
+It checks `ContractError`, `investigation_failed` / `FAILED`, zero provider
+calls, an audit identifying the rejected tool, and an unchanged persisted
+record on duplicate delivery, including after replacing the broken adapter.
+Complete duck-typed adapters remain supported; event scope rejection still
+precedes adapter validation. See the [patch decision and limits](release-v0.2.1.md).
 
 * M0–M5: implemented and locally exercised through full regression and offline replay.
 * M6: Anthropic adapter implemented; HTTP-contract and common-core integration exercised using mock transport.

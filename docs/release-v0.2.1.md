@@ -1,0 +1,75 @@
+# AgenticDef v0.2.1 — evidence adapter terminal failure
+
+Patch preparation / 修補版本準備。Published versions are recorded in
+[GitHub Releases](https://github.com/trionnemesis/AgenticDef/releases).
+
+## Problem and first-principles decision / 問題與取捨
+
+[Issue #2, E3](https://github.com/trionnemesis/AgenticDef/issues/2) identifies
+a gap in the existing bounded-investigation contract. At base `e53f716`,
+an evidence adapter missing `get_rbac_object` raises `AttributeError`
+after the local claim is created. The stored record remains
+`INVESTIGATING` with no result, even though no model call has occurred.
+A duplicate submission then returns that unfinished record indefinitely.
+
+The smallest correction is to finish this known integration failure using
+the existing error and persistence path. It advances Gate D (termination)
+and Gate F (bounded duplicates) without granting permission to reclaim a
+crashed investigation. Valid adapters and public JSON Schemas keep their
+existing behavior, so this is a `0.2.x` patch rather than a new feature version.
+
+缺少必要方法是 adapter 整合契約錯誤。這次以既有 `ContractError` 保存失敗
+終態，讓重送能取得明確結果；不需要先導入新工具、registry 框架或自動恢復機制。
+
+## Behavior / 行為
+
+- After event/policy admission, validate the four fixed evidence capability
+  attributes before calling any provider. Each must exist and be callable.
+- A missing or non-callable attribute produces an `adapter_rejected` audit
+  entry naming the tool, followed by a `ContractError` failure and terminal
+  record: `status: investigation_failed`, `risk: unknown`, `state: FAILED`.
+- No model, tool or evidence budget is consumed. Repeated delivery returns
+  the same failed record, including after the adapter is repaired.
+- Complete duck-typed adapters remain valid. Policy/scope checks still
+  authorize individual calls. No capability, authority or target write path
+  is added, and no failure becomes benign.
+- The source/package version is `0.2.1`; this preparation does not alter the
+  existing Pages/test/release workflow or overwrite `v0.2.0`.
+
+## Evidence / 驗收
+
+The targeted regression set fails against the original runtime with
+**8 failed, 2 passed**: four missing methods escape as `AttributeError`, and
+four non-callable methods are classified as missing evidence only after
+provider work starts. With the patch the same set reports **10 passed**.
+Assertions cover persisted terminal state, audit, zero provider calls,
+duplicate delivery, valid duck typing and event-scope rejection precedence.
+Exact-commit CI/JUnit and S01–S08 replay artifacts remain the authority for
+the complete suite; no live API or cluster was used for this patch.
+
+## Limits and deferred observations / 限制與後續
+
+This only validates required callable attributes. It does not prove Python
+method signatures, async/cancellation behavior or semantic correctness.
+Existing call handling remains responsible for invocation failures. A
+process crash, cancellation outside that handling, or persistence failure
+can still leave a blocked claim; no recovery/lease policy is introduced.
+Existing unfinished records are not migrated or reopened.
+
+Issue #2 is an audit, not a blanket implementation order, and remains open:
+
+- E1/E2/E4: no fifth capability or second event type is required by the
+  current SPEC. A fifth-tool scope failure needs a separate approved extension.
+- E5–E9 beyond this E3 case: context size, evidence accounting, remote
+  persistence and reclaim require their own demonstrated scenario/decision.
+  Budget maxima are ceilings, not a promise that every run reaches a verdict.
+- V1–V4/V6: referential grounding and real-model semantic evaluation are
+  distinct. This patch does not claim model accuracy or move fixture verdict
+  logic into production.
+- V5: a checksum verifies a downloaded artifact's integrity; it does not
+  promise byte-identical regeneration with a wall clock. No clock or release
+  checksum change is needed for this defect.
+- V7 is a separate small packaging candidate: assess the `dev` extra's
+  missing `httpx` dependency in a clean environment before changing it.
+- V8 and publication-policy observations are not prerequisites for fixing
+  the reproduced adapter failure.

@@ -90,7 +90,7 @@ make replay
 make build
 ```
 
-目前是 experimental v0.2.0。M0–M5 已完成本機 replay 與回歸；M6 已實作並通過離線 HTTP 與共享核心測試，真實 API 呼叫尚未實測。沒有 live GKE adapter、雲端 dispatcher、remediation、多 agent 或生產 UI。
+目前原始碼版本是 experimental v0.2.1。[修補說明](docs/release-v0.2.1.md)記錄 evidence adapter 缺少必要可呼叫方法時的終態修正；已發布版本以 GitHub Releases 為準。M0–M5 已完成本機 replay 與回歸；M6 已實作並通過離線 HTTP 與共享核心測試，真實 API 呼叫尚未實測。沒有 live GKE adapter、雲端 dispatcher、remediation、多 agent 或生產 UI。
 
 CI 驗證 Python 3.11/3.12；通過後才開放 Pages 與首次版本發布。既有 Release 不會覆寫。完整狀態請看 [驗收紀錄](docs/verification.md)，架構選擇請看 [ADR](docs/adr-0001.md)。
 
