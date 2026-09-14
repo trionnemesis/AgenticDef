@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -41,6 +42,74 @@ def test_invalid_event_calls_nothing(tmp_path):
     with pytest.raises(ContractError): asyncio.run(inv.run(event))
     assert model.calls == 0 and not tools.executed
     assert list(tmp_path.iterdir()) == []
+
+
+def evidence_adapter(tools):
+    # An independent duck-typed adapter: no FixtureTools inheritance.
+    return SimpleNamespace(
+        provenance=tools.provenance,
+        get_change_event=tools.get_change_event,
+        get_rbac_object=tools.get_rbac_object,
+        get_subject_bindings=tools.get_subject_bindings,
+        get_approval_record=tools.get_approval_record,
+    )
+
+
+@pytest.mark.parametrize("method", [
+    "get_change_event", "get_rbac_object", "get_subject_bindings", "get_approval_record",
+])
+@pytest.mark.parametrize("defect", ["missing", "non_callable"])
+def test_invalid_evidence_adapter_persists_failed_result(tmp_path, method, defect):
+    inv, event, model, tools, repo = setup(tmp_path)
+    inv.tools = evidence_adapter(tools)
+    if defect == "missing":
+        delattr(inv.tools, method)
+    else:
+        setattr(inv.tools, method, None)
+
+    record = asyncio.run(inv.run(event))
+    result = record["result"]
+    assert record["state"] == "FAILED"
+    assert result["status"] == "investigation_failed" and result["risk"] == "unknown"
+    assert result["termination_reason"] == "ContractError"
+    assert result["findings"] == [] and result["missing_evidence"] == []
+    assert model.calls == 0 and not tools.executed
+    assert all(result["budget_usage"][k] == 0 for k in ("model_calls", "tool_calls", "evidence_items"))
+    assert any(a["kind"] == "adapter_rejected" and a["tool"] == method for a in record["audit"])
+    assert any(a["kind"] == "failure" and a["error"] == "ContractError" for a in record["audit"])
+    assert record["audit"][-1]["kind"] == "terminal"
+    assert record["audit"][-1]["target"] == "FAILED"
+    assert repo.get_by_idempotency_key(record["investigation_id"]) == record
+
+    path = tmp_path / record["investigation_id"] / "record.json"
+    persisted = path.read_bytes()
+    assert asyncio.run(inv.run(event)) == record
+    # Fixing the adapter must not silently authorize re-investigation of a terminal key.
+    inv.tools = tools
+    inv.repository = JsonRepository(tmp_path)
+    assert asyncio.run(inv.run(event)) == record
+    assert path.read_bytes() == persisted
+    assert model.calls == 0 and not tools.executed
+
+
+def test_complete_duck_typed_evidence_adapter_is_accepted(tmp_path):
+    inv, event, _, tools, _ = setup(tmp_path)
+    inv.tools = evidence_adapter(tools)
+    record = asyncio.run(inv.run(event))
+    assert record["state"] == "COMPLETED"
+    assert record["result"]["status"] == "confirmed_suspicious"
+    assert len(tools.executed) == 5
+
+
+def test_event_scope_rejection_precedes_adapter_validation(tmp_path):
+    inv, event, model, tools, _ = setup(tmp_path)
+    event["event_id"] = "outside-trusted-scope"
+    inv.tools = SimpleNamespace(provenance=tools.provenance)
+    record = asyncio.run(inv.run(event))
+    assert record["state"] == "FAILED"
+    assert record["result"]["termination_reason"] == "PolicyError"
+    assert not any(a["kind"] == "adapter_rejected" for a in record["audit"])
+    assert model.calls == 0 and not tools.executed
 
 
 def test_untrusted_policy_in_event_does_not_grant_tool(tmp_path):
