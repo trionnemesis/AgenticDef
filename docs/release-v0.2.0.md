@@ -12,3 +12,5 @@ First experimental implementation of the supplied v0.2 specification.
 Install the attached wheel plus dependencies, or extract the source distribution for the scenarios and tests. Replay requires no network after installation. SHA256SUMS covers the attached distributions and replay summary.
 
 **Validation boundary:** synthetic replay and HTTP mocks are exercised; actual Anthropic API calls, live GKE evidence and model detection accuracy are not validated. Cloud deployment, remediation, multi-agent and production operation are not implemented. This release is not a production SOC service.
+
+**Publication control / 發布控制:** source preparation and a tested merge do not authorize publishing. The fixed first-release path may create `v0.2.0` only after GitHub confirms that release is absent and the package version is exactly `0.2.0`; otherwise it fails closed without changing any release or tag. Any later release requires a separate publishing decision.
