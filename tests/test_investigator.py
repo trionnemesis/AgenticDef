@@ -146,30 +146,76 @@ def test_result_synthesis_is_budgeted(tmp_path):
     assert model.calls == 6 and len(tools.executed) == 5
 
 
-def test_active_model_deadline_cancels(tmp_path):
+@pytest.fixture
+def deadline_clock():
+    # Keep setup/audit I/O out of active-call tests; asyncio.wait_for still uses
+    # the real event-loop clock and must cancel the suspended adapter.
+    class Clock(SystemClock):
+        value = 0.0
+        def monotonic(self): return self.value
+    return Clock()
+
+
+def test_active_model_deadline_cancels(tmp_path, deadline_clock):
     class Slow(ReplayModel):
-        cancelled = False
+        started = cancelled = False
         async def choose_action(self, context, allowed_tools):
             self.calls += 1
-            try: await asyncio.sleep(60)
-            finally: self.cancelled = True
+            self.started = True
+            try: await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                deadline_clock.value = 0.1
+                raise
     model = Slow()
     inv, event, _, tools, _ = setup(tmp_path, model=model, changes={"max_runtime_seconds": 0.1})
-    result = asyncio.run(inv.run(event))["result"]
-    assert result["termination_reason"] == "BudgetError" and model.cancelled
+    inv.clock = deadline_clock
+    result = asyncio.run(asyncio.wait_for(inv.run(event), timeout=5))["result"]
+    assert result["termination_reason"] == "BudgetError"
+    assert model.started and model.cancelled and model.calls == 1
     assert not tools.executed
 
 
-def test_active_tool_deadline_cancels(tmp_path):
-    inv, event, _, _, _ = setup(tmp_path, changes={"max_runtime_seconds": 0.1})
+def test_active_tool_deadline_cancels(tmp_path, deadline_clock):
+    inv, event, model, _, repo = setup(tmp_path, changes={"max_runtime_seconds": 0.1})
+    inv.clock = deadline_clock
     class SlowTools(FixtureTools):
-        cancelled = False
+        started = cancelled = False
         async def get_change_event(self, event_id):
-            try: await asyncio.sleep(60)
-            finally: self.cancelled = True
+            self.started = True
+            try: await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                deadline_clock.value = 0.1
+                raise
     tools = SlowTools([]); inv.tools = tools
-    result = asyncio.run(inv.run(event))["result"]
-    assert result["termination_reason"] == "BudgetError" and tools.cancelled
+    record = asyncio.run(asyncio.wait_for(inv.run(event), timeout=5))
+    result = record["result"]
+    assert result["termination_reason"] == "BudgetError"
+    assert tools.started and tools.cancelled and model.calls == 1
+    assert result["budget_usage"]["tool_calls"] == 1
+    assert record["state"] == "INCONCLUSIVE" and result["risk"] == "unknown"
+    assert repo.get_by_idempotency_key(record["investigation_id"]) == record
+
+
+def test_deadline_before_tool_invocation_blocks_tool(tmp_path, deadline_clock):
+    class ExpiringRepository(JsonRepository):
+        def append_audit_event(self, key, event):
+            super().append_audit_event(key, event)
+            if event["kind"] == "policy_permitted":
+                deadline_clock.value = 0.1
+
+    inv, event, model, tools, repo = setup(
+        tmp_path, changes={"max_runtime_seconds": 0.1}, repo=ExpiringRepository(tmp_path),
+    )
+    inv.clock = deadline_clock
+    record = asyncio.run(inv.run(event))
+    result = record["result"]
+    assert result["termination_reason"] == "BudgetError"
+    assert model.calls == 1 and not tools.executed
+    assert result["budget_usage"]["tool_calls"] == 0
+    assert record["state"] == "INCONCLUSIVE" and result["risk"] == "unknown"
+    assert repo.get_by_idempotency_key(record["investigation_id"]) == record
 
 
 def test_terminal_duplicate_returns_identical_without_calls(tmp_path):
