@@ -12,7 +12,7 @@ from .adapters.fixture_tools import FixtureTools
 from .adapters.replay_model import ReplayModel
 from .adapters.repository import JsonRepository
 from .application.investigate import Investigator
-from .domain.contracts import canonical
+from .domain.contracts import canonical, validate
 from .domain.errors import ContractError, InvestigationError
 
 
@@ -42,7 +42,8 @@ def assert_expected(record, expected, tools):
 
 
 async def run_scenario(path, output):
-    expected, policy = load(path / "expected.yaml"), load(path / "policy.yaml")
+    expected = validate("expected", load(path / "expected.yaml"))
+    policy = load(path / "policy.yaml")
     model = ReplayModel(load(path / "model.json").get("fault"))
     tools = FixtureTools(load(path / "evidence.json"))
     repository = JsonRepository(output)
