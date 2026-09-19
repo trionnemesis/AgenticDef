@@ -18,6 +18,16 @@ class Investigator:
         self.policy = Policy(policy)
         self.model, self.tools, self.repository, self.clock = model, tools, repository, clock
 
+    @staticmethod
+    def _validate_existing(existing, metadata):
+        # Both duplicate paths must enforce the same identity/result checks.
+        if existing is not None:
+            if "metadata" in existing and existing["metadata"] != metadata:
+                raise PolicyError("Idempotency key reused with changed event or policy")
+            if existing["state"] in TERMINAL:
+                validate("result", existing["result"])
+        return existing
+
     async def run(self, event):
         event = deepcopy(validate("event", event))
         key = identity(event["event_id"], self.policy.version)
@@ -28,13 +38,10 @@ class Investigator:
                         evidence_provider=getattr(self.tools, "provenance", "test_double"))
         existing = self.repository.get_by_idempotency_key(key)
         if existing is not None:
-            if "metadata" in existing and existing["metadata"] != metadata:
-                raise PolicyError("Idempotency key reused with changed event or policy")
-            if existing["state"] in TERMINAL:
-                validate("result", existing["result"])
-            return existing
+            return self._validate_existing(existing, metadata)
         if not self.repository.create_investigation(key, metadata):
-            return self.repository.get_by_idempotency_key(key)
+            existing = self.repository.get_by_idempotency_key(key)
+            return self._validate_existing(existing, metadata)
         budget = Budget(self.policy, self.clock)
         started_at = self.clock.utcnow()
         ledger = Ledger()
