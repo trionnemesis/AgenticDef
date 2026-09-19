@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReplayExpectation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "statuses",
+    "risks",
+    "required_methods",
+    "forbidden_tools",
+    "forbidden_claims",
+    "termination_reason"
+  ],
+  "properties": {
+    "statuses": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "draft.schema.json#/properties/status"}
+    },
+    "risks": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "draft.schema.json#/properties/risk"}
+    },
+    "submissions": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "required_methods": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "evidence.schema.json#/properties/method"}
+    },
+    "forbidden_tools": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 64}
+    },
+    "forbidden_claims": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 1024}
+    },
+    "termination_reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    }
+  }
+}
