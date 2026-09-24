@@ -21,14 +21,26 @@ def result(returncode: int, *, stdout: str = "", stderr: str = "") -> subprocess
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
 
 
-def recorder(lookup: subprocess.CompletedProcess[str], create: subprocess.CompletedProcess[str] | None = None):
+def recorder(lookup, create=None, tag=None, peeled=None):
+    """Route mocked gh calls: release lookup, tag ref lookup, annotated-tag peel, create."""
     calls: list[list[str]] = []
 
     def runner(args):
         calls.append(list(args))
-        return lookup if args[:2] == ["gh", "api"] else (create or result(0))
+        if args[:2] == ["gh", "api"]:
+            if "/releases/tags/" in args[2]:
+                return lookup
+            if "/git/ref/tags/" in args[2]:
+                return tag or result(1, stderr=ABSENT)
+            if "/git/tags/" in args[2]:
+                return peeled or result(1, stderr="HTTP 500")
+        return create or result(0)
 
     return calls, runner
+
+
+def creates(calls):
+    return [c for c in calls if c[:3] == ["gh", "release", "create"]]
 
 
 def layout(tmp_path: Path, version: str = "0.2.1", *, dist_names=None, notes=True, evidence=True):
@@ -60,8 +72,9 @@ def test_absent_release_creates_tag_from_package_version(tmp_path) -> None:
     calls, runner = recorder(result(1, stderr=ABSENT))
     paths = layout(tmp_path)
     ensure(tmp_path, runner, **paths)
-    assert len(calls) == 2
-    create = calls[1]
+    assert [c[2] for c in calls[:2]] == ["repos/owner/repo/releases/tags/v0.2.1", "repos/owner/repo/git/ref/tags/v0.2.1"]
+    assert len(calls) == 3
+    create = calls[2]
     assert create[:4] == ["gh", "release", "create", "v0.2.1"]
     assert create[create.index("--target") + 1] == "abc123"
     assert create[create.index("--notes-file") + 1] == str(paths["docs"] / "release-v0.2.1.md")
@@ -101,14 +114,37 @@ def test_mismatched_or_missing_distributions_fail_before_create(tmp_path, names)
     calls, runner = recorder(result(1, stderr=ABSENT))
     with pytest.raises(release.GuardError, match="Distribution/version mismatch|Wheel and source"):
         ensure(tmp_path, runner, **layout(tmp_path, dist_names=names))
-    assert all(c[:2] == ["gh", "api"] for c in calls)
+    assert not creates(calls)
 
 
 def test_missing_release_evidence_fails_before_create(tmp_path) -> None:
     calls, runner = recorder(result(1, stderr=ABSENT))
     with pytest.raises(release.GuardError, match="Release evidence missing"):
         ensure(tmp_path, runner, **layout(tmp_path, evidence=False))
-    assert all(c[:2] == ["gh", "api"] for c in calls)
+    assert not creates(calls)
+
+
+@pytest.mark.parametrize(("tag", "peeled"), [
+    (result(0, stdout="commit abc123\n"), None),
+    (result(0, stdout="tag t1\n"), result(0, stdout="commit abc123\n")),
+])
+def test_existing_tag_at_tested_commit_allows_create(tmp_path, tag, peeled) -> None:
+    calls, runner = recorder(result(1, stderr=ABSENT), tag=tag, peeled=peeled)
+    ensure(tmp_path, runner)
+    assert len(creates(calls)) == 1
+
+
+@pytest.mark.parametrize(("tag", "peeled"), [
+    (result(0, stdout="commit def456\n"), None),
+    (result(0, stdout="tag t1\n"), result(0, stdout="commit def456\n")),
+    (result(0, stdout="tag t1\n"), result(1, stderr="HTTP 500")),
+    (result(1, stderr="gh: HTTP 403"), None),
+])
+def test_stale_or_unresolvable_tag_fails_before_create(tmp_path, tag, peeled) -> None:
+    calls, runner = recorder(result(1, stderr=ABSENT), tag=tag, peeled=peeled)
+    with pytest.raises(release.GuardError, match="does not point at|Cannot resolve tag"):
+        ensure(tmp_path, runner)
+    assert not creates(calls)
 
 
 def test_create_failure_is_loud(tmp_path) -> None:

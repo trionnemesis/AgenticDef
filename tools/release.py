@@ -34,6 +34,27 @@ def _lookup_is_confirmed_absent(result: subprocess.CompletedProcess[str]) -> boo
     return result.returncode != 0 and re.search(r"\bHTTP 404\b", result.stderr or "") is not None
 
 
+def _ensure_tag_absent_or_at(runner, repo: str, tag: str, release_sha: str) -> None:
+    # `gh release create --target` is ignored when the tag already exists, so a
+    # stale tag would silently attach tested assets to another commit.
+    ref = runner(["gh", "api", f"repos/{repo}/git/ref/tags/{tag}", "--jq", '.object.type + " " + .object.sha'])
+    if ref.returncode != 0:
+        if _lookup_is_confirmed_absent(ref):
+            return
+        detail = (ref.stderr or ref.stdout or "unknown tag lookup failure").strip()
+        raise GuardError(f"Cannot resolve tag {tag}; refusing mutation / 無法確認 tag {tag}，拒絕任何變更: {detail}")
+    kind, _, sha = ref.stdout.strip().partition(" ")
+    if kind == "tag":
+        # Annotated tag: dereference to the commit it names.
+        peeled = runner(["gh", "api", f"repos/{repo}/git/tags/{sha}", "--jq", '.object.type + " " + .object.sha'])
+        kind, _, sha = peeled.stdout.strip().partition(" ") if peeled.returncode == 0 else ("", "", "")
+    if kind != "commit" or sha != release_sha:
+        raise GuardError(
+            f"Existing tag {tag} does not point at {release_sha}; refusing mutation / "
+            f"既有 tag {tag} 未指向 {release_sha}，拒絕任何變更: {ref.stdout.strip()}"
+        )
+
+
 def _assets(dist: Path, version: str) -> list[str]:
     wheels = sorted(dist.glob("*.whl"))
     sdists = sorted(dist.glob("*.tar.gz"))
@@ -77,13 +98,15 @@ def ensure_release(
             f"無法確認 {tag} 不存在，拒絕任何變更: {detail}"
         )
 
+    assets = _assets(dist, package_version)
+    _ensure_tag_absent_or_at(runner, repo, tag, release_sha)
     create = runner(
         [
             "gh",
             "release",
             "create",
             tag,
-            *_assets(dist, package_version),
+            *assets,
             "--target",
             release_sha,
             "--title",

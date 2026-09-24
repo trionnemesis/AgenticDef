@@ -25,6 +25,7 @@ when:
 
 * the version is not `MAJOR.MINOR.PATCH`, or its notes file is missing;
 * GitHub cannot confirm the release is absent (anything other than HTTP 404);
+* tag `v<version>` already exists but does not resolve to the tested commit, or cannot be resolved;
 * a built distribution does not match the version, or checksums/replay summary are missing.
 
 If the release already exists it is left unchanged. The helper never
