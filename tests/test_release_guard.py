@@ -5,96 +5,167 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
-MODULE_PATH = Path(__file__).parents[1] / "tools" / "first_release.py"
-SPEC = importlib.util.spec_from_file_location("first_release", MODULE_PATH)
+ROOT = Path(__file__).parents[1]
+MODULE_PATH = ROOT / "tools" / "release.py"
+SPEC = importlib.util.spec_from_file_location("release", MODULE_PATH)
 assert SPEC and SPEC.loader
-first_release = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(first_release)
+release = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(release)
+
+ABSENT = "gh: Not Found (HTTP 404)"
 
 
 def result(returncode: int, *, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
 
 
-def test_existing_release_is_left_unchanged() -> None:
-    calls: list[list[str]] = []
-
-    def runner(args):
-        calls.append(list(args))
-        return result(0)
-
-    first_release.ensure_first_release(
-        repo="owner/repo",
-        release_sha="abc123",
-        package_version="0.2.1",
-        runner=runner,
-    )
-
-    assert len(calls) == 1
-    assert calls[0][:2] == ["gh", "api"]
-
-
-def test_absent_release_rejects_mismatched_package_before_create() -> None:
-    calls: list[list[str]] = []
-
-    def runner(args):
-        calls.append(list(args))
-        return result(1, stderr="gh: Not Found (HTTP 404)")
-
-    with pytest.raises(first_release.GuardError, match="Package/tag mismatch"):
-        first_release.ensure_first_release(
-            repo="owner/repo",
-            release_sha="abc123",
-            package_version="0.2.1",
-            runner=runner,
-        )
-
-    assert len(calls) == 1
-    assert calls[0][:2] == ["gh", "api"]
-
-
-def test_absent_release_allows_fixed_version_create_path_with_mocked_gh() -> None:
+def recorder(lookup, create=None, tag=None, peeled=None):
+    """Route mocked gh calls: release lookup, tag ref lookup, annotated-tag peel, create."""
     calls: list[list[str]] = []
 
     def runner(args):
         calls.append(list(args))
         if args[:2] == ["gh", "api"]:
-            return result(1, stderr="gh: Not Found (HTTP 404)")
-        return result(0)
+            if "/releases/tags/" in args[2]:
+                return lookup
+            if "/git/ref/tags/" in args[2]:
+                return tag or result(1, stderr=ABSENT)
+            if "/git/tags/" in args[2]:
+                return peeled or result(1, stderr="HTTP 500")
+        return create or result(0)
 
-    first_release.ensure_first_release(
-        repo="owner/repo",
-        release_sha="abc123",
-        package_version="0.2.0",
-        runner=runner,
-    )
-
-    assert len(calls) == 2
-    assert calls[1][:4] == ["gh", "release", "create", "v0.2.0"]
-    assert calls[1][calls[1].index("--target") + 1] == "abc123"
+    return calls, runner
 
 
-def test_lookup_uncertainty_fails_closed_before_create() -> None:
-    calls: list[list[str]] = []
-
-    def runner(args):
-        calls.append(list(args))
-        return result(1, stderr="gh: HTTP 403: Resource not accessible by integration")
-
-    with pytest.raises(first_release.GuardError, match="Cannot prove"):
-        first_release.ensure_first_release(
-            repo="owner/repo",
-            release_sha="abc123",
-            package_version="0.2.0",
-            runner=runner,
-        )
-
-    assert len(calls) == 1
-    assert calls[0][:2] == ["gh", "api"]
+def creates(calls):
+    return [c for c in calls if c[:3] == ["gh", "release", "create"]]
 
 
-def test_workflow_delegates_mutation_to_guard() -> None:
-    workflow = (Path(__file__).parents[1] / ".github" / "workflows" / "ci.yml").read_text()
-    assert "python tools/first_release.py" in workflow
-    assert "gh release create" not in workflow
+def layout(tmp_path: Path, version: str = "0.2.1", *, dist_names=None, notes=True, evidence=True):
+    dist, docs = tmp_path / "dist", tmp_path / "docs"
+    dist.mkdir()
+    docs.mkdir()
+    for name in dist_names or [f"agenticdef-{version}-py3-none-any.whl", f"agenticdef-{version}.tar.gz"]:
+        (dist / name).write_text("x")
+    if evidence:
+        (dist / "SHA256SUMS").write_text("x")
+        (dist / "replay-summary.json").write_text("{}")
+    if notes:
+        (docs / f"release-v{version}.md").write_text("notes")
+    return {"dist": dist, "docs": docs}
+
+
+def ensure(tmp_path, runner, version="0.2.1", **paths):
+    release.ensure_release(repo="owner/repo", release_sha="abc123", package_version=version,
+                           runner=runner, **(paths or layout(tmp_path, version)))
+
+
+def test_existing_release_is_left_unchanged(tmp_path) -> None:
+    calls, runner = recorder(result(0))
+    ensure(tmp_path, runner)
+    assert calls == [["gh", "api", "repos/owner/repo/releases/tags/v0.2.1", "--silent"]]
+
+
+def test_absent_release_creates_tag_from_package_version(tmp_path) -> None:
+    calls, runner = recorder(result(1, stderr=ABSENT))
+    paths = layout(tmp_path)
+    ensure(tmp_path, runner, **paths)
+    assert [c[2] for c in calls[:2]] == ["repos/owner/repo/releases/tags/v0.2.1", "repos/owner/repo/git/ref/tags/v0.2.1"]
+    assert len(calls) == 3
+    create = calls[2]
+    assert create[:4] == ["gh", "release", "create", "v0.2.1"]
+    assert create[create.index("--target") + 1] == "abc123"
+    assert create[create.index("--notes-file") + 1] == str(paths["docs"] / "release-v0.2.1.md")
+    assert {Path(a).name for a in create[4:create.index("--target")]} == {
+        "agenticdef-0.2.1-py3-none-any.whl", "agenticdef-0.2.1.tar.gz", "SHA256SUMS", "replay-summary.json"}
+
+
+def test_lookup_uncertainty_fails_closed_before_create(tmp_path) -> None:
+    calls, runner = recorder(result(1, stderr="gh: HTTP 403: Resource not accessible by integration"))
+    with pytest.raises(release.GuardError, match="Cannot prove"):
+        ensure(tmp_path, runner)
+    assert len(calls) == 1 and calls[0][:2] == ["gh", "api"]
+
+
+@pytest.mark.parametrize("version", ["0.2", "v0.2.1", "0.2.1rc1", "0.2.1\n", ""])
+def test_unsupported_version_fails_before_any_call(tmp_path, version) -> None:
+    calls, runner = recorder(result(1, stderr=ABSENT))
+    with pytest.raises(release.GuardError, match="Unsupported package version"):
+        ensure(tmp_path, runner, version, **layout(tmp_path, "0.2.1"))
+    assert calls == []
+
+
+def test_missing_notes_fail_before_any_call(tmp_path) -> None:
+    calls, runner = recorder(result(1, stderr=ABSENT))
+    with pytest.raises(release.GuardError, match="Release notes required"):
+        ensure(tmp_path, runner, **layout(tmp_path, notes=False))
+    assert calls == []
+
+
+@pytest.mark.parametrize("names", [
+    ["agenticdef-0.2.0-py3-none-any.whl", "agenticdef-0.2.1.tar.gz"],
+    ["agenticdef-0.2.1-py3-none-any.whl", "agenticdef-0.2.10.tar.gz"],
+    ["agenticdef-0.2.1-py3-none-any.whl", "agenticdef-0.2.1.tar.gz", "agenticdef-0.2.0.tar.gz"],
+    ["agenticdef-0.2.1-py3-none-any.whl"],
+])
+def test_mismatched_or_missing_distributions_fail_before_create(tmp_path, names) -> None:
+    calls, runner = recorder(result(1, stderr=ABSENT))
+    with pytest.raises(release.GuardError, match="Distribution/version mismatch|Wheel and source"):
+        ensure(tmp_path, runner, **layout(tmp_path, dist_names=names))
+    assert not creates(calls)
+
+
+def test_missing_release_evidence_fails_before_create(tmp_path) -> None:
+    calls, runner = recorder(result(1, stderr=ABSENT))
+    with pytest.raises(release.GuardError, match="Release evidence missing"):
+        ensure(tmp_path, runner, **layout(tmp_path, evidence=False))
+    assert not creates(calls)
+
+
+@pytest.mark.parametrize(("tag", "peeled"), [
+    (result(0, stdout="commit abc123\n"), None),
+    (result(0, stdout="tag t1\n"), result(0, stdout="commit abc123\n")),
+])
+def test_existing_tag_at_tested_commit_allows_create(tmp_path, tag, peeled) -> None:
+    calls, runner = recorder(result(1, stderr=ABSENT), tag=tag, peeled=peeled)
+    ensure(tmp_path, runner)
+    assert len(creates(calls)) == 1
+
+
+@pytest.mark.parametrize(("tag", "peeled"), [
+    (result(0, stdout="commit def456\n"), None),
+    (result(0, stdout="tag t1\n"), result(0, stdout="commit def456\n")),
+    (result(0, stdout="tag t1\n"), result(1, stderr="HTTP 500")),
+    (result(1, stderr="gh: HTTP 403"), None),
+])
+def test_stale_or_unresolvable_tag_fails_before_create(tmp_path, tag, peeled) -> None:
+    calls, runner = recorder(result(1, stderr=ABSENT), tag=tag, peeled=peeled)
+    with pytest.raises(release.GuardError, match="does not point at|Cannot resolve tag"):
+        ensure(tmp_path, runner)
+    assert not creates(calls)
+
+
+def test_create_failure_is_loud(tmp_path) -> None:
+    _, runner = recorder(result(1, stderr=ABSENT), result(1, stderr="HTTP 422"))
+    with pytest.raises(release.GuardError, match="Release creation failed"):
+        ensure(tmp_path, runner)
+
+
+def test_current_version_has_release_notes() -> None:
+    version = release.read_project_version(ROOT / "pyproject.toml")
+    assert release.VERSION.fullmatch(version)
+    assert (ROOT / "docs" / f"release-v{version}.md").is_file()
+
+
+def test_only_manual_dispatch_on_main_can_publish() -> None:
+    text = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    jobs = yaml.safe_load(text)["jobs"]
+    job = jobs["release"]
+    assert job["if"] == "github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'"
+    assert set(job["needs"]) == {"test", "dev-extra"}
+    assert job["steps"][-1]["run"] == "python tools/release.py"
+    assert "gh release" not in text
+    writers = [name for name, j in jobs.items() if j.get("permissions", {}).get("contents") == "write"]
+    assert writers == ["release"]

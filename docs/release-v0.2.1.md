@@ -1,7 +1,28 @@
-# AgenticDef v0.2.1 — evidence adapter terminal failure
+# AgenticDef v0.2.1 — bounded-investigation hardening
 
-Patch preparation / 修補版本準備。Published versions are recorded in
+Patch release of the v0.2 local investigation core / v0.2 本機調查核心的修補版本。
+No new capability, event type, schema field or runtime dependency. The four
+read-only tools, budgets, grounding rules and terminal states are unchanged.
+Published versions are recorded in
 [GitHub Releases](https://github.com/trionnemesis/AgenticDef/releases).
+
+## Changes since v0.2.0 / 自 v0.2.0 以來
+
+| Change | Issue / PR | Gate |
+|---|---|---|
+| An evidence adapter missing a callable required tool now persists a failed terminal record instead of a stuck `INVESTIGATING` claim (details below) | #2 E3 / #3 | D, F |
+| A lost atomic claim runs the same identity and terminal-result checks as a found duplicate record | #4 / #12 | A, F |
+| `expected.yaml` is schema-validated before any model, tool or record exists; malformed acceptance input exits `2` | #5 / #13 | A, E |
+| `.[dev]` alone installs everything the offline suite needs; CI checks it in a clean virtualenv | #7 / #14 | — |
+| S01/S02 run end to end through the Anthropic adapter over a mock HTTP transport, graded by the scenario evaluator, with an inverted-verdict negative control | #8 / #15 | C, E |
+| Publishing requires a human-started `workflow_dispatch` run on `main`; the tag comes from the package version and the guard fails closed | #6 / #10, this release | — |
+
+**Validation boundary / 驗證界線:** synthetic replay and scripted mock HTTP
+responses are exercised. Actual Anthropic API calls, live GKE evidence, model
+detection accuracy and real prompt-injection resistance are **not** validated.
+This is not a production SOC service.
+
+The remaining sections record the evidence adapter decision (#2 E3).
 
 ## Problem and first-principles decision / 問題與取捨
 
@@ -33,8 +54,7 @@ existing behavior, so this is a `0.2.x` patch rather than a new feature version.
 - Complete duck-typed adapters remain valid. Policy/scope checks still
   authorize individual calls. No capability, authority or target write path
   is added, and no failure becomes benign.
-- The source/package version is `0.2.1`; this preparation does not alter the
-  existing Pages/test/release workflow or overwrite `v0.2.0`.
+- `v0.2.0` and its assets stay published unchanged.
 
 ## Evidence / 驗收
 

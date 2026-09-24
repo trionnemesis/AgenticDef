@@ -123,7 +123,7 @@ An intentionally failed **investigation** can be a passing **regression scenario
 | `src/agenticdef/contracts/` | Normative JSON Schemas (including `expected.schema.json`), bundled in the wheel |
 | `scenarios/S01`–`S08` | Events, policies, evidence, hostile model scripts and expected outcomes |
 | `tests/` | Contract, authority, grounding, budget, duplicate and HTTP regressions |
-| `tools/first_release.py` | Fail-closed guard for the fixed first `v0.2.0` release |
+| `tools/release.py` | Fail-closed helper for manually started releases of the current version |
 | `site/` | Static introduction; no investigation endpoint or credentials |
 
 ## Development
@@ -136,7 +136,7 @@ make replay
 make build
 ```
 
-CI runs the full tests and offline replay on Python 3.11 and 3.12, builds the distribution, replays S01–S08 from the wheel outside the checkout, and uploads JUnit/replay evidence. A separate job installs only `.[dev]` in a clean virtualenv and runs the offline suite, so a missing dev dependency fails CI. On `main`, passing CI permits independent Pages and first-release jobs. The release job may create `v0.2.0` only when GitHub confirms it is absent **and** the package version is exactly `0.2.0`; any other state, including an uncertain lookup, fails closed. Existing releases are never overwritten. Pages must be enabled with GitHub Actions as its publishing source. See [publication](docs/publication.md).
+CI runs the full tests and offline replay on Python 3.11 and 3.12, builds the distribution, replays S01–S08 from the wheel outside the checkout, and uploads JUnit/replay evidence. A separate job installs only `.[dev]` in a clean virtualenv and runs the offline suite, so a missing dev dependency fails CI. On `main`, passing CI deploys Pages. Publishing a release requires a human to start the workflow manually on `main`; it then tags the `pyproject.toml` version only when GitHub confirms that release is absent and the notes and distributions match, and otherwise fails closed. Existing releases are never overwritten. Pages must be enabled with GitHub Actions as its publishing source. See [publication](docs/publication.md).
 
 ## Status
 

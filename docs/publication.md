@@ -12,11 +12,27 @@ The intended URL is `https://trionnemesis.github.io/AgenticDef/`. A successful w
 
 ## Release
 
-The release job builds wheel and source distribution, computes SHA-256 checksums and creates v0.2.0 at the exact tested commit using the job's scoped `GITHUB_TOKEN`. It attaches the distributions, checksums and replay summary, and uses [v0.2.0 notes](release-v0.2.0.md). It never overwrites an existing release or force-moves a tag. No personal token is required.
+Only a human can publish. The release job runs when someone starts the CI
+workflow manually (`workflow_dispatch`) on `main`; pushes and pull requests
+never reach it. It waits for the full test matrix and the clean `.[dev]` job,
+then builds the wheel and source distribution, replays S01–S08 into
+`replay-summary.json` and computes SHA-256 checksums.
 
-Subsequent commits continue running CI and Pages. A new product release needs a deliberate version/notes change; it is not automatically inferred from every commit. A permission/setup failure remains visible in Actions and is not bypassed with alternate credentials.
+`tools/release.py` then publishes the version in `pyproject.toml` as tag
+`v<version>` at the exact tested commit, using the job's scoped `GITHUB_TOKEN`
+and `docs/release-v<version>.md` as notes. It fails closed before any mutation
+when:
 
-The v0.2.1 source bump and [patch notes](release-v0.2.1.md) prepare the next
-patch; they do not publish it. The first-release workflow still targets
-v0.2.0 and is unchanged. Publishing v0.2.1 is a separate maintainer action
-against the tested merge commit; retain v0.2.0 and its assets as published.
+* the version is not `MAJOR.MINOR.PATCH`, or its notes file is missing;
+* GitHub cannot confirm the release is absent (anything other than HTTP 404);
+* tag `v<version>` already exists but does not resolve to the tested commit, or cannot be resolved;
+* a built distribution does not match the version, or checksums/replay summary are missing.
+
+If the release already exists it is left unchanged. The helper never
+overwrites, deletes or force-moves a release or tag, and no personal token is
+required. A permission/setup failure stays visible in Actions and is not
+bypassed with alternate credentials.
+
+A new product release therefore needs three deliberate steps: bump the version,
+add its notes, and start the workflow. `v0.2.0` and its assets remain as
+originally published.

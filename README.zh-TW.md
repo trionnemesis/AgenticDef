@@ -100,7 +100,7 @@ make build
 
 M0–M5 已完成本機 replay 與回歸；M6 已實作並通過離線 HTTP 與共享核心測試，包括以 mock HTTP transport 完整執行 S01/S02、由情境評估器評分，以及反向判定的負向控制（[#8](https://github.com/trionnemesis/AgenticDef/issues/8)）。這些是腳本化回應；真實 API 呼叫尚未實測，模型準確率未量測。沒有 live GKE adapter、雲端 dispatcher、remediation、多 agent 或生產 UI。
 
-CI 在 Python 3.11/3.12 執行完整測試與 replay、建置套件，並在 checkout 之外以 wheel 重跑 S01–S08；另有獨立 job 在乾淨環境只安裝 `.[dev]` 執行離線測試。通過後 `main` 才開放 Pages 與首次版本發布：只有在 GitHub 確認 `v0.2.0` 不存在**且**套件版本正好是 `0.2.0` 時才會建立，其他狀態（含查詢結果不確定）一律 fail closed。既有 Release 不會覆寫。完整狀態請看 [驗收紀錄](docs/verification.md)，架構選擇請看 [ADR](docs/adr-0001.md)。
+CI 在 Python 3.11/3.12 執行完整測試與 replay、建置套件，並在 checkout 之外以 wheel 重跑 S01–S08；另有獨立 job 在乾淨環境只安裝 `.[dev]` 執行離線測試。通過後 `main` 會部署 Pages。發布版本必須由人在 `main` 手動啟動 workflow：只有在 GitHub 確認該版本不存在、版本說明與套件都與 `pyproject.toml` 版本一致時才會建立 tag 與 release，其他狀態（含查詢結果不確定）一律 fail closed。既有 Release 不會覆寫。完整狀態請看 [驗收紀錄](docs/verification.md)，架構選擇請看 [ADR](docs/adr-0001.md)。
 
 ## 下一階段
 
