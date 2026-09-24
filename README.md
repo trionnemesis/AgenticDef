@@ -7,9 +7,9 @@
 
 > A bounded, read-only investigation runtime for security events. The model proposes what to inspect; deterministic code controls capabilities, scope, budgets, evidence references, and termination. Missing evidence never silently becomes benign.
 
-🌐 [GitHub Pages introduction](https://trionnemesis.github.io/AgenticDef/) · **[繁體中文](README.zh-TW.md)** · [Architecture](docs/architecture.md) · [Acceptance evidence](docs/verification.md) · [Releases](https://github.com/trionnemesis/AgenticDef/releases) · [Issues](https://github.com/trionnemesis/AgenticDef/issues)
+🌐 [GitHub Pages introduction](https://trionnemesis.github.io/AgenticDef/) · **[繁體中文](README.zh-TW.md)** · [Architecture](docs/architecture.md) · [Acceptance evidence](docs/verification.md) · [Roadmap](docs/roadmap.md) · [Releases](https://github.com/trionnemesis/AgenticDef/releases) · [Issues](https://github.com/trionnemesis/AgenticDef/issues)
 
-Jump to: [Why](#why) · [What it does](#what-it-does) · [How it works](#how-it-works) · [Quick start](#quick-start) · [Scenarios](#scenarios) · [Trust boundaries](#trust-boundaries) · [Status](#status)
+Jump to: [Why](#why) · [What it does](#what-it-does) · [How it works](#how-it-works) · [Quick start](#quick-start) · [Scenarios](#scenarios) · [Trust boundaries](#trust-boundaries) · [Status](#status) · [Roadmap](#roadmap)
 
 ---
 
@@ -25,13 +25,13 @@ The difficult part is the authority boundary: evidence may contain instructions,
 
 | Capability | Behavior |
 |---|---|
-| Normative contracts | Bundled JSON Schemas validate events, policies, actions, evidence, drafts and results |
+| Normative contracts | Bundled JSON Schemas validate events, policies, actions, evidence, drafts, results and replay expectations |
 | Trusted policy | Exact tool and resource allowlists; model/event content cannot modify them |
 | Bounded execution | Runtime, model calls, tool calls and evidence item limits; reserve before invoking |
 | Four read-only tools | Change event, versioned RBAC object, subject bindings and approval record |
 | Evidence ledger | Content-addressed IDs, request/body integrity hashes and explicit provenance |
 | Grounded findings | Non-empty references must exist; conclusive results require all five relevant reads |
-| Safe duplicate handling | Atomic local claim on `event_id + policy_version`; running work is not duplicated |
+| Safe duplicate handling | Atomic local claim on `event_id + policy_version`; running work is not duplicated; a lost claim gets the same identity/result checks as a found record |
 | Offline replay | Eight synthetic scenarios with structural assertions and persistent audit/result records |
 | One model adapter | Anthropic Messages API, bounded response, no automatic retries, fixed endpoint |
 
@@ -63,14 +63,14 @@ git clone https://github.com/trionnemesis/AgenticDef.git
 cd AgenticDef
 python -m venv .venv
 source .venv/bin/activate
-pip install -e '.[dev,anthropic]'
+pip install -e '.[dev]'
 
 python -m pytest -q
 replay scenarios --all --output results/first-run
 replay scenarios/S01
 ```
 
-On Windows, activate with `.venv\Scripts\Activate.ps1`. A fresh temporary output directory is used when `--output` is omitted. Reusing an output directory returns previously persisted terminal results; it does not execute the event again.
+`.[dev]` is enough for the full offline suite, including the mocked HTTP adapter tests. On Windows, activate with `.venv\Scripts\Activate.ps1`. A fresh temporary output directory is used when `--output` is omitted. Reusing an output directory returns previously persisted terminal results; it does not execute the event again.
 
 The CLI prints the output directory. Each investigation stores a `record.json` with metadata, ordered audit transitions, evidence, hash-addressed bodies, terminal state and result. The repository and release source archive include the scenario corpus; the wheel includes runtime schemas, **not** the corpus. Pass a checkout's scenario path when using a wheel elsewhere.
 
@@ -99,7 +99,7 @@ See [model adapter](docs/model-adapter.md) for protocol tests and the unverified
 | S07 | Unsupported tool | `investigation_failed` | Registry rejection before adapter execution |
 | S08 | Fabricated evidence reference | `investigation_failed` | Invalid finding never becomes an accepted finding |
 
-An intentionally failed **investigation** can be a passing **regression scenario** when it fails safely for the expected reason. Replay exit codes: `0` all selected scenario assertions passed; `1` an assertion failed; `2` setup or persistence error. Real-model mode: `0` likely benign; `1` confirmed suspicious; `2` unresolved or failed. Do not interpret replay exit `0` as “the environment is secure.”
+An intentionally failed **investigation** can be a passing **regression scenario** when it fails safely for the expected reason. Replay exit codes: `0` all selected scenario assertions passed; `1` an assertion failed; `2` setup or persistence error, including an `expected.yaml` that fails its schema (checked before any model, tool or record is created). Real-model mode: `0` likely benign; `1` confirmed suspicious; `2` unresolved or failed. Do not interpret replay exit `0` as “the environment is secure.”
 
 ## Trust boundaries
 
@@ -120,9 +120,10 @@ An intentionally failed **investigation** can be a passing **regression scenario
 | `src/agenticdef/application/` | Single investigator loop |
 | `src/agenticdef/ports.py` | Model, evidence, repository and clock interfaces |
 | `src/agenticdef/adapters/` | Fixture tools, replay model, JSON persistence, clock and Anthropic |
-| `src/agenticdef/contracts/` | Normative JSON Schemas, bundled in the wheel |
+| `src/agenticdef/contracts/` | Normative JSON Schemas (including `expected.schema.json`), bundled in the wheel |
 | `scenarios/S01`–`S08` | Events, policies, evidence, hostile model scripts and expected outcomes |
 | `tests/` | Contract, authority, grounding, budget, duplicate and HTTP regressions |
+| `tools/first_release.py` | Fail-closed guard for the fixed first `v0.2.0` release |
 | `site/` | Static introduction; no investigation endpoint or credentials |
 
 ## Development
@@ -135,13 +136,30 @@ make replay
 make build
 ```
 
-CI runs the full tests and offline replay on Python 3.11 and 3.12, builds the distribution, and uploads JUnit/replay evidence. On `main`, passing CI permits independent Pages and v0.2.0 release jobs. Existing releases are never overwritten. Pages must be enabled with GitHub Actions as its publishing source. See [publication](docs/publication.md).
+CI runs the full tests and offline replay on Python 3.11 and 3.12, builds the distribution, replays S01–S08 from the wheel outside the checkout, and uploads JUnit/replay evidence. A separate job installs only `.[dev]` in a clean virtualenv and runs the offline suite, so a missing dev dependency fails CI. On `main`, passing CI permits independent Pages and first-release jobs. The release job may create `v0.2.0` only when GitHub confirms it is absent **and** the package version is exactly `0.2.0`; any other state, including an uncertain lookup, fails closed. Existing releases are never overwritten. Pages must be enabled with GitHub Actions as its publishing source. See [publication](docs/publication.md).
 
 ## Status
 
-**Experimental v0.2.1 source.** The [patch notes](docs/release-v0.2.1.md) cover terminal failure for an evidence adapter missing a callable required tool; GitHub Releases records published versions. M0–M5 replay and regression checks have run locally. M6's real provider adapter has offline protocol and shared-core integration tests; an actual Anthropic API call has **not** been validated in this delivery. Cloud ingestion, live GKE evidence, production operation and remediation are not implemented. [Verification](docs/verification.md) separates these boundaries.
+**Experimental v0.2.1 source; the only published release is [v0.2.0](https://github.com/trionnemesis/AgenticDef/releases/tag/v0.2.0).** Publishing v0.2.1 is a separate maintainer decision. Since v0.2.0 the source has fixed:
+
+* evidence adapter missing a callable required tool → persisted failed terminal record ([patch notes](docs/release-v0.2.1.md), [#2](https://github.com/trionnemesis/AgenticDef/issues/2) E3);
+* lost atomic claim skipping duplicate identity/result validation ([#4](https://github.com/trionnemesis/AgenticDef/issues/4));
+* malformed `expected.yaml` able to produce a vacuous pass ([#5](https://github.com/trionnemesis/AgenticDef/issues/5));
+* 0.2.1 package able to attach to `v0.2.0` if that release were absent ([#6](https://github.com/trionnemesis/AgenticDef/issues/6));
+* `.[dev]` unable to collect the offline suite ([#7](https://github.com/trionnemesis/AgenticDef/issues/7)).
+
+M0–M5 replay and regression checks pass. M6's real provider adapter has offline protocol and shared-core integration tests, including complete S01/S02 runs over a mock HTTP transport graded by the scenario evaluator and an inverted-verdict negative control ([#8](https://github.com/trionnemesis/AgenticDef/issues/8)). These use scripted responses; an actual Anthropic API call has **not** been validated and model accuracy is unmeasured. Cloud ingestion, live GKE evidence, production operation and remediation are not implemented. [Verification](docs/verification.md) separates these boundaries.
 
 The supplied [SPEC](SPEC-v0.2.md), [DESIGN](DESIGN-v0.2.md), [WORK ORDER](WORK_ORDER-v0.2.md), and [AGENTS](AGENTS.md) are preserved. Implementation choices for unspecified fields are recorded in [ADR 0001](docs/adr-0001.md).
+
+## Roadmap
+
+See [docs/roadmap.md](docs/roadmap.md). In short:
+
+1. **Close out v0.2.x** — #8 (tests only) is implemented; close the [#9](https://github.com/trionnemesis/AgenticDef/issues/9) tracker, and decide separately whether to publish v0.2.1. No new capability or runtime semantics.
+2. **Decision gate before v0.3** — the SPEC allows one live read-only GCP/GKE evidence adapter next, but only after human answers to the open questions in [#2](https://github.com/trionnemesis/AgenticDef/issues/2) section D (capability freeze, event types, live evidence size, semantic-evaluation ownership, crashed-claim recovery, publication authority). No v0.3 design is approved yet.
+
+Remediation, multi-agent orchestration, generic execution tools and production deployment remain out of scope.
 
 ## Contributing
 
