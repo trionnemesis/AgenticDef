@@ -148,7 +148,7 @@ CI runs the full tests and offline replay on Python 3.11 and 3.12, builds the di
 * 0.2.1 package able to attach to `v0.2.0` if that release were absent ([#6](https://github.com/trionnemesis/AgenticDef/issues/6));
 * `.[dev]` unable to collect the offline suite ([#7](https://github.com/trionnemesis/AgenticDef/issues/7)).
 
-M0–M5 replay and regression checks pass. M6's real provider adapter has offline protocol and shared-core integration tests; a complete mocked verdict evaluation is still open ([#8](https://github.com/trionnemesis/AgenticDef/issues/8)), and an actual Anthropic API call has **not** been validated. Cloud ingestion, live GKE evidence, production operation and remediation are not implemented. [Verification](docs/verification.md) separates these boundaries.
+M0–M5 replay and regression checks pass. M6's real provider adapter has offline protocol and shared-core integration tests, including complete S01/S02 runs over a mock HTTP transport graded by the scenario evaluator and an inverted-verdict negative control ([#8](https://github.com/trionnemesis/AgenticDef/issues/8)). These use scripted responses; an actual Anthropic API call has **not** been validated and model accuracy is unmeasured. Cloud ingestion, live GKE evidence, production operation and remediation are not implemented. [Verification](docs/verification.md) separates these boundaries.
 
 The supplied [SPEC](SPEC-v0.2.md), [DESIGN](DESIGN-v0.2.md), [WORK ORDER](WORK_ORDER-v0.2.md), and [AGENTS](AGENTS.md) are preserved. Implementation choices for unspecified fields are recorded in [ADR 0001](docs/adr-0001.md).
 
@@ -156,7 +156,7 @@ The supplied [SPEC](SPEC-v0.2.md), [DESIGN](DESIGN-v0.2.md), [WORK ORDER](WORK_O
 
 See [docs/roadmap.md](docs/roadmap.md). In short:
 
-1. **Close out v0.2.x** — land #8 (tests only), close the [#9](https://github.com/trionnemesis/AgenticDef/issues/9) tracker, and decide separately whether to publish v0.2.1. No new capability or runtime semantics.
+1. **Close out v0.2.x** — #8 (tests only) is implemented; close the [#9](https://github.com/trionnemesis/AgenticDef/issues/9) tracker, and decide separately whether to publish v0.2.1. No new capability or runtime semantics.
 2. **Decision gate before v0.3** — the SPEC allows one live read-only GCP/GKE evidence adapter next, but only after human answers to the open questions in [#2](https://github.com/trionnemesis/AgenticDef/issues/2) section D (capability freeze, event types, live evidence size, semantic-evaluation ownership, crashed-claim recovery, publication authority). No v0.3 design is approved yet.
 
 Remediation, multi-agent orchestration, generic execution tools and production deployment remain out of scope.

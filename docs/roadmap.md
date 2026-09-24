@@ -14,7 +14,7 @@ publication.
 | [#5](https://github.com/trionnemesis/AgenticDef/issues/5) — `expected.yaml` accepted malformed input | Fixed, closed | `df6468c`, `contracts/expected.schema.json`, `tests/test_expectations.py` |
 | [#6](https://github.com/trionnemesis/AgenticDef/issues/6) — 0.2.1 package could attach to `v0.2.0` | Guard merged; issue open for maintainer closure | `4ea55cd`, `tools/first_release.py`, `tests/test_release_guard.py` |
 | [#7](https://github.com/trionnemesis/AgenticDef/issues/7) — `.[dev]` could not collect tests | Fixed, closed | `c2af276`, CI `dev-extra` job |
-| [#8](https://github.com/trionnemesis/AgenticDef/issues/8) — no full HTTP-mock verdict evaluation | **Open** | — |
+| [#8](https://github.com/trionnemesis/AgenticDef/issues/8) — no full HTTP-mock verdict evaluation | Tests added; issue closes on merge | `tests/test_anthropic_evaluation.py` |
 | Published releases | `v0.2.0` only | [Releases](https://github.com/trionnemesis/AgenticDef/releases) |
 
 Local check at this baseline: `pytest` 132 passed from a clean `.[dev]`
@@ -24,11 +24,11 @@ install; `replay scenarios --all` S01–S08 all `passed: true`.
 
 No new capability, event type, dependency or runtime semantics.
 
-1. **#8 — full HTTP-mock verdict evaluation** (tests only, Gates C/E, M6).
-   Run S01/S02 end to end through `AnthropicModel` with `httpx.MockTransport`,
-   grade the persisted record with the existing expectation evaluator, and add
-   an inverted-but-grounded S01 verdict that must fail status/risk checks.
-   Stop and report if a runtime seam is missing instead of widening runtime.
+1. **#8 — full HTTP-mock verdict evaluation** (tests only, Gates C/E, M6) — implemented.
+   Runs S01/S02 end to end through `AnthropicModel` with `httpx.MockTransport`,
+   grades the persisted record with the existing expectation evaluator, and adds
+   an inverted-but-grounded S01 verdict that fails only status/risk checks.
+   No runtime seam was missing; runtime code is unchanged.
 2. **Tracker hygiene (maintainer).** Close #6 against `4ea55cd` if accepted and
    tick the #9 checklist. Keep #2 open; its deferred observations stay there.
 3. **v0.2.1 publication decision (maintainer).** The release job only guards the
@@ -36,7 +36,7 @@ No new capability, event type, dependency or runtime semantics.
    makes no mutation. Publishing v0.2.1 needs a separate, explicit decision and
    path (see #2 section C and question 7 below). Nothing is auto-published.
 
-Exit criteria: #8 merged with red/green evidence, full suite and S01–S08
+Exit criteria: #8 merged with negative-control evidence, full suite and S01–S08
 green on Python 3.11/3.12, clean `.[dev]` job green, #9 checklist complete.
 
 ## Phase 2 — decision gate before v0.3 / v0.3 前的決策關卡

@@ -24,7 +24,7 @@ Complete duck-typed adapters remain supported; event scope rejection still
 precedes adapter validation. See the [patch decision and limits](release-v0.2.1.md).
 
 * M0–M5: implemented and locally exercised through full regression and offline replay.
-* M6: Anthropic adapter implemented; HTTP-contract and common-core integration exercised using mock transport.
+* M6: Anthropic adapter implemented; HTTP-contract and common-core integration exercised using mock transport. `tests/test_anthropic_evaluation.py` runs S01/S02 end to end through `AnthropicModel` (five exact reads, finish, grounded draft citing the evidence IDs the adapter actually sent) and grades the records with the replay evaluator. A referentially valid but inverted S01 verdict completes in the runtime and fails only the evaluator's status/risk checks; a fabricated reference over HTTP fails with `GroundingError`. These are **scripted mock HTTP responses over fixture evidence**, not live model accuracy or real prompt-injection resistance.
 * Actual model API use: **not tested** in this delivery.
 * Live GCP/GKE evidence, event subscription, production deployment, remediation, multi-agent: **not implemented**, intentionally out of v0.2 scope.
 * GitHub Pages and Release: only successful deployment/release records establish publication; their workflow files alone do not.

@@ -98,7 +98,7 @@ make build
 * 若 v0.2.0 不存在，0.2.1 套件可能被掛到 `v0.2.0`（[#6](https://github.com/trionnemesis/AgenticDef/issues/6)）；
 * 只安裝 `.[dev]` 無法收集離線測試（[#7](https://github.com/trionnemesis/AgenticDef/issues/7)）。
 
-M0–M5 已完成本機 replay 與回歸；M6 已實作並通過離線 HTTP 與共享核心測試，完整的 mock 判定評估仍待完成（[#8](https://github.com/trionnemesis/AgenticDef/issues/8)），真實 API 呼叫尚未實測。沒有 live GKE adapter、雲端 dispatcher、remediation、多 agent 或生產 UI。
+M0–M5 已完成本機 replay 與回歸；M6 已實作並通過離線 HTTP 與共享核心測試，包括以 mock HTTP transport 完整執行 S01/S02、由情境評估器評分，以及反向判定的負向控制（[#8](https://github.com/trionnemesis/AgenticDef/issues/8)）。這些是腳本化回應；真實 API 呼叫尚未實測，模型準確率未量測。沒有 live GKE adapter、雲端 dispatcher、remediation、多 agent 或生產 UI。
 
 CI 在 Python 3.11/3.12 執行完整測試與 replay、建置套件，並在 checkout 之外以 wheel 重跑 S01–S08；另有獨立 job 在乾淨環境只安裝 `.[dev]` 執行離線測試。通過後 `main` 才開放 Pages 與首次版本發布：只有在 GitHub 確認 `v0.2.0` 不存在**且**套件版本正好是 `0.2.0` 時才會建立，其他狀態（含查詢結果不確定）一律 fail closed。既有 Release 不會覆寫。完整狀態請看 [驗收紀錄](docs/verification.md)，架構選擇請看 [ADR](docs/adr-0001.md)。
 
@@ -106,7 +106,7 @@ CI 在 Python 3.11/3.12 執行完整測試與 replay、建置套件，並在 che
 
 詳見 [docs/roadmap.md](docs/roadmap.md)。摘要：
 
-1. **收斂 v0.2.x**：完成 #8（只加測試）、關閉 [#9](https://github.com/trionnemesis/AgenticDef/issues/9) 追蹤、另行決定是否發布 v0.2.1。不新增能力，不改 runtime 語意。
+1. **收斂 v0.2.x**：#8（只加測試）已實作；關閉 [#9](https://github.com/trionnemesis/AgenticDef/issues/9) 追蹤、另行決定是否發布 v0.2.1。不新增能力，不改 runtime 語意。
 2. **v0.3 前的決策關卡**：SPEC 允許下一版加入一個 live 唯讀 GCP/GKE 證據 adapter，但須先由人回答 [#2](https://github.com/trionnemesis/AgenticDef/issues/2) section D 的問題（能力是否凍結、事件類型、live 證據大小、語意正確性歸屬、crashed claim 回收、發布權限）。目前沒有已核准的 v0.3 設計。
 
 Remediation、多 agent 編排、通用執行工具與生產部署仍不在範圍內。

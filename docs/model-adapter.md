@@ -8,7 +8,7 @@ JSON-only prompting improves interoperability; it grants no permissions. Every p
 
 ## Tested boundary
 
-Offline httpx transports test request headers/body, response limits, malformed and failed responses, deadline cancellation, unsupported tool rejection and preservation of replay-vs-provider provenance. These tests make no external calls and require no real API key.
+Offline httpx transports test request headers/body, response limits, malformed and failed responses, deadline cancellation, unsupported tool rejection, preservation of replay-vs-provider provenance, and complete S01/S02 runs graded by the scenario evaluator, including an inverted-verdict negative control. Responses are scripted. These tests make no external calls and require no real API key.
 
 ## Not yet verified
 
