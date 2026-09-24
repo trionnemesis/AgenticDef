@@ -99,9 +99,10 @@ jobs:
           artifact_name: github-pages-${{ github.run_attempt }}
 
   release:
-    name: First v0.2.0 release / 首次版本發布
-    needs: test
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    # Publishing needs a human to start this workflow on main; pushes and PRs never publish.
+    name: Manual release / 手動發布版本
+    needs: [test, dev-extra]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -126,4 +127,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ github.sha }}
           GH_REPO: ${{ github.repository }}
-        run: python tools/first_release.py
+        run: python tools/release.py

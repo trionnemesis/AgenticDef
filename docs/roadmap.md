@@ -12,7 +12,7 @@ publication.
 | [#2](https://github.com/trionnemesis/AgenticDef/issues/2) E3 — adapter contract failure leaves a stuck claim | Fixed (v0.2.1 source) | `41c5b18`, [patch notes](release-v0.2.1.md) |
 | [#4](https://github.com/trionnemesis/AgenticDef/issues/4) — lost-claim duplicate skipped identity checks | Fixed, closed | `d9eb89f`, `tests/test_duplicate_claim.py` |
 | [#5](https://github.com/trionnemesis/AgenticDef/issues/5) — `expected.yaml` accepted malformed input | Fixed, closed | `df6468c`, `contracts/expected.schema.json`, `tests/test_expectations.py` |
-| [#6](https://github.com/trionnemesis/AgenticDef/issues/6) — 0.2.1 package could attach to `v0.2.0` | Guard merged; issue open for maintainer closure | `4ea55cd`, `tools/first_release.py`, `tests/test_release_guard.py` |
+| [#6](https://github.com/trionnemesis/AgenticDef/issues/6) — 0.2.1 package could attach to `v0.2.0` | Guard merged; issue open for maintainer closure | `4ea55cd`, `tools/release.py`, `tests/test_release_guard.py` |
 | [#7](https://github.com/trionnemesis/AgenticDef/issues/7) — `.[dev]` could not collect tests | Fixed, closed | `c2af276`, CI `dev-extra` job |
 | [#8](https://github.com/trionnemesis/AgenticDef/issues/8) — no full HTTP-mock verdict evaluation | Tests added; issue closes on merge | `tests/test_anthropic_evaluation.py` |
 | Published releases | `v0.2.0` only | [Releases](https://github.com/trionnemesis/AgenticDef/releases) |
