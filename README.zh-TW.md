@@ -6,7 +6,7 @@
 
 > 受政策與預算限制、唯讀且可追溯證據的 AI 安全調查 runtime。模型提出調查動作；確定性程式碼決定哪些工具、資源、呼叫與結論可以被接受。
 
-🌐 [GitHub Pages 簡介](https://trionnemesis.github.io/AgenticDef/) · [English](README.md) · [架構](docs/architecture.md) · [驗收證據](docs/verification.md) · [Releases](https://github.com/trionnemesis/AgenticDef/releases)
+🌐 [GitHub Pages 簡介](https://trionnemesis.github.io/AgenticDef/) · [English](README.md) · [架構](docs/architecture.md) · [驗收證據](docs/verification.md) · [下一階段規劃](docs/roadmap.md) · [Releases](https://github.com/trionnemesis/AgenticDef/releases)
 
 ## 為什麼需要
 
@@ -18,12 +18,12 @@
 
 | 能力 | 實際行為 |
 |---|---|
-| 契約驗證 | JSON Schema 驗證事件、政策、動作、證據與結果 |
+| 契約驗證 | JSON Schema 驗證事件、政策、動作、證據、結果與 replay 驗收預期（`expected.yaml`） |
 | 權限控制 | 工具白名單與精確資源範圍；不信任模型授權 |
 | 預算限制 | 執行時間、模型呼叫、工具呼叫、證據數量皆有上限 |
 | 唯讀工具 | 僅四項：變更事件、版本化 RBAC、主體綁定、核准紀錄 |
 | 證據 grounding | 發現必須引用已存在的證據；定論需要完整五次相關讀取 |
-| 冪等處理 | `event_id + policy_version` 原子取得工作權；重送不重複執行 |
+| 冪等處理 | `event_id + policy_version` 原子取得工作權；重送不重複執行；claim 競爭落敗時與既有紀錄走相同的身分與結果驗證 |
 | 可重播驗收 | S01–S08、audit、持久化結果、結構式斷言 |
 | 單一模型 adapter | Anthropic API；離線 HTTP 與核心整合測試，未實測真實 API |
 
@@ -36,12 +36,12 @@ git clone https://github.com/trionnemesis/AgenticDef.git
 cd AgenticDef
 python -m venv .venv
 source .venv/bin/activate
-pip install -e '.[dev,anthropic]'
+pip install -e '.[dev]'
 python -m pytest -q
 replay scenarios --all --output results/first-run
 ```
 
-Windows 啟用虛擬環境使用 `.venv\Scripts\Activate.ps1`。未指定 `--output` 時建立新的暫存目錄；重用既有輸出目錄會回傳原本的終態結果，不會重新調查。
+`.[dev]` 已足以執行完整離線測試，包含 mock HTTP 的模型 adapter 測試。Windows 啟用虛擬環境使用 `.venv\Scripts\Activate.ps1`。未指定 `--output` 時建立新的暫存目錄；重用既有輸出目錄會回傳原本的終態結果，不會重新調查。
 
 每個調查的 `record.json` 包含事件與政策雜湊、來源標記、稽核順序、證據、原始內容、結果與終態。Wheel 內含 schema；情境資料位於 repo 與 source archive，從別的目錄使用 wheel 時需指定情境路徑。
 
@@ -58,7 +58,7 @@ Windows 啟用虛擬環境使用 `.venv\Scripts\Activate.ps1`。未指定 `--out
 | S07 未註冊工具 | `investigation_failed` |
 | S08 捏造證據 ID | `investigation_failed`；不接受該發現 |
 
-「調查安全地失敗」可以是「回歸情境通過」。Replay 結束碼 `0` 代表驗收斷言符合預期，**不代表環境安全**；`1` 代表斷言失敗，`2` 代表設定或持久化錯誤。
+「調查安全地失敗」可以是「回歸情境通過」。Replay 結束碼 `0` 代表驗收斷言符合預期，**不代表環境安全**；`1` 代表斷言失敗，`2` 代表設定或持久化錯誤，包括 `expected.yaml` 不符 schema（在建立模型、工具或紀錄之前檢查）。
 
 ## 模型 API 模式
 
@@ -90,9 +90,26 @@ make replay
 make build
 ```
 
-目前原始碼版本是 experimental v0.2.1。[修補說明](docs/release-v0.2.1.md)記錄 evidence adapter 缺少必要可呼叫方法時的終態修正；已發布版本以 GitHub Releases 為準。M0–M5 已完成本機 replay 與回歸；M6 已實作並通過離線 HTTP 與共享核心測試，真實 API 呼叫尚未實測。沒有 live GKE adapter、雲端 dispatcher、remediation、多 agent 或生產 UI。
+目前原始碼版本是 experimental v0.2.1；**已發布的版本只有 [v0.2.0](https://github.com/trionnemesis/AgenticDef/releases/tag/v0.2.0)**，是否發布 v0.2.1 由維護者另行決定。v0.2.0 之後原始碼已修正：
 
-CI 驗證 Python 3.11/3.12；通過後才開放 Pages 與首次版本發布。既有 Release 不會覆寫。完整狀態請看 [驗收紀錄](docs/verification.md)，架構選擇請看 [ADR](docs/adr-0001.md)。
+* evidence adapter 缺少必要可呼叫方法 → 保存失敗終態（[修補說明](docs/release-v0.2.1.md)、[#2](https://github.com/trionnemesis/AgenticDef/issues/2) E3）；
+* claim 競爭落敗時略過重送身分與結果驗證（[#4](https://github.com/trionnemesis/AgenticDef/issues/4)）；
+* 格式錯誤的 `expected.yaml` 可能讓驗收空洞通過（[#5](https://github.com/trionnemesis/AgenticDef/issues/5)）；
+* 若 v0.2.0 不存在，0.2.1 套件可能被掛到 `v0.2.0`（[#6](https://github.com/trionnemesis/AgenticDef/issues/6)）；
+* 只安裝 `.[dev]` 無法收集離線測試（[#7](https://github.com/trionnemesis/AgenticDef/issues/7)）。
+
+M0–M5 已完成本機 replay 與回歸；M6 已實作並通過離線 HTTP 與共享核心測試，完整的 mock 判定評估仍待完成（[#8](https://github.com/trionnemesis/AgenticDef/issues/8)），真實 API 呼叫尚未實測。沒有 live GKE adapter、雲端 dispatcher、remediation、多 agent 或生產 UI。
+
+CI 在 Python 3.11/3.12 執行完整測試與 replay、建置套件，並在 checkout 之外以 wheel 重跑 S01–S08；另有獨立 job 在乾淨環境只安裝 `.[dev]` 執行離線測試。通過後 `main` 才開放 Pages 與首次版本發布：只有在 GitHub 確認 `v0.2.0` 不存在**且**套件版本正好是 `0.2.0` 時才會建立，其他狀態（含查詢結果不確定）一律 fail closed。既有 Release 不會覆寫。完整狀態請看 [驗收紀錄](docs/verification.md)，架構選擇請看 [ADR](docs/adr-0001.md)。
+
+## 下一階段
+
+詳見 [docs/roadmap.md](docs/roadmap.md)。摘要：
+
+1. **收斂 v0.2.x**：完成 #8（只加測試）、關閉 [#9](https://github.com/trionnemesis/AgenticDef/issues/9) 追蹤、另行決定是否發布 v0.2.1。不新增能力，不改 runtime 語意。
+2. **v0.3 前的決策關卡**：SPEC 允許下一版加入一個 live 唯讀 GCP/GKE 證據 adapter，但須先由人回答 [#2](https://github.com/trionnemesis/AgenticDef/issues/2) section D 的問題（能力是否凍結、事件類型、live 證據大小、語意正確性歸屬、crashed claim 回收、發布權限）。目前沒有已核准的 v0.3 設計。
+
+Remediation、多 agent 編排、通用執行工具與生產部署仍不在範圍內。
 
 ## 貢獻與授權
 
