@@ -156,8 +156,8 @@ The supplied [SPEC](SPEC-v0.2.md), [DESIGN](DESIGN-v0.2.md), [WORK ORDER](WORK_O
 
 See [docs/roadmap.md](docs/roadmap.md). In short:
 
-1. **Close out v0.2.x** — #8 (tests only) is implemented; close the [#9](https://github.com/trionnemesis/AgenticDef/issues/9) tracker, and decide separately whether to publish v0.2.1. No new capability or runtime semantics.
-2. **Decision gate before v0.3** — the SPEC allows one live read-only GCP/GKE evidence adapter next, but only after human answers to the open questions in [#2](https://github.com/trionnemesis/AgenticDef/issues/2) section D (capability freeze, event types, live evidence size, semantic-evaluation ownership, crashed-claim recovery, publication authority). No v0.3 design is approved yet.
+1. **v0.2.x follow-ups delivered** — #4–#8 are closed; the [#9](https://github.com/trionnemesis/AgenticDef/issues/9) checklist is complete and its tracker is closed. [#16](https://github.com/trionnemesis/AgenticDef/issues/16) synchronizes README, Pages and this roadmap status. The manual release path is implemented ([#17](https://github.com/trionnemesis/AgenticDef/pull/17)); publishing v0.2.1 remains a separate maintainer action. No new capability or runtime semantics.
+2. **Decision gate before v0.3** — the SPEC allows one live read-only GCP/GKE evidence adapter next, but only after human answers to the open questions in [#2](https://github.com/trionnemesis/AgenticDef/issues/2) section D (capability freeze, event types, live evidence size, semantic-evaluation ownership, crashed-claim recovery, provider/model opt-in and cost limits). No v0.3 design is approved yet.
 
 Remediation, multi-agent orchestration, generic execution tools and production deployment remain out of scope.
 

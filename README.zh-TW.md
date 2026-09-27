@@ -106,8 +106,8 @@ CI 在 Python 3.11/3.12 執行完整測試與 replay、建置套件，並在 che
 
 詳見 [docs/roadmap.md](docs/roadmap.md)。摘要：
 
-1. **收斂 v0.2.x**：#8（只加測試）已實作；關閉 [#9](https://github.com/trionnemesis/AgenticDef/issues/9) 追蹤、另行決定是否發布 v0.2.1。不新增能力，不改 runtime 語意。
-2. **v0.3 前的決策關卡**：SPEC 允許下一版加入一個 live 唯讀 GCP/GKE 證據 adapter，但須先由人回答 [#2](https://github.com/trionnemesis/AgenticDef/issues/2) section D 的問題（能力是否凍結、事件類型、live 證據大小、語意正確性歸屬、crashed claim 回收、發布權限）。目前沒有已核准的 v0.3 設計。
+1. **v0.2.x 後續修正已交付**：#4–#8 已結案；[#9](https://github.com/trionnemesis/AgenticDef/issues/9) 清單已完成，追蹤 issue 也已關閉。[#16](https://github.com/trionnemesis/AgenticDef/issues/16) 同步 README、Pages 與 roadmap 狀態。手動發布路徑已實作（[#17](https://github.com/trionnemesis/AgenticDef/pull/17)）；發布 v0.2.1 仍是維護者另行執行的動作。不新增能力，不改 runtime 語意。
+2. **v0.3 前的決策關卡**：SPEC 允許下一版加入一個 live 唯讀 GCP/GKE 證據 adapter，但須先由人回答 [#2](https://github.com/trionnemesis/AgenticDef/issues/2) section D 的問題（能力是否凍結、事件類型、live 證據大小、語意正確性歸屬、crashed claim 回收、provider／model 明確選用與費用上限）。目前沒有已核准的 v0.3 設計。
 
 Remediation、多 agent 編排、通用執行工具與生產部署仍不在範圍內。
 
