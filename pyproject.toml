@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agenticdef"
 version = "0.2.1"
-description = "Bounded, read-only, evidence-grounded security investigation"
+description = "Bounded, read-only AI security investigation runtime — deterministic scope, budget and evidence-grounding checks, replay-tested offline"
 requires-python = ">=3.11"
 license = "MIT"
 readme = "README.md"
