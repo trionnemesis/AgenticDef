@@ -11,7 +11,9 @@ Why this exists. The runtime proves referential grounding only (DESIGN-v0.2,
 completes as `likely_benign/low` and passes every runtime check. Maintainer
 decision D4: semantic correctness is owned by an evaluation layer OUTSIDE the
 runtime. PR-1 adds an independent deterministic RBAC reference oracle and a
-fail-closed evaluation report. It adds no runtime capability.
+fail-closed evaluation report. It adds no runtime capability. PR-4 (maintainer
+decision D8, 2026-10-02) adds an opt-in `live` mode that runs only under a
+committed, pre-registered protocol with hard spend caps (section 11).
 
 Every normative requirement carries an ID of the form `EV-<AREA>-<NN>`. Each
 ID is referenced by at least one test under `tests/test_evals_*.py`, and each
@@ -24,10 +26,10 @@ expected label, escalation categories and an `expected` record; case builders;
 a runner that executes the same runtime in `replay` or `mock` mode and grades
 the persisted record against the oracle; a deterministic report.
 
-Out of scope (PR-1): `live` mode (needs maintainer decision D8), any real model
-or network call, new dependencies, new tools, remediation, multi-agent,
-modifying `ReplayModel`, scenarios, `expected.yaml` files or any file under
-`src/agenticdef/`.
+Out of scope: any real model or network call outside section 11, new
+dependencies, new tools, remediation, multi-agent, modifying `ReplayModel`,
+scenarios or `expected.yaml` files. Under `src/agenticdef/` only the provider
+adapter's response-shape rule changed (section 11, decision D8 option A).
 
 Scenario coverage. The oracle is graded against S01, S02, S03 and S05
 (evidence semantics and missing evidence; S05 is run as a single submission,
@@ -57,8 +59,14 @@ test runtime controls, which stay under `replay scenarios --all`.
   `recursive-include evals *.py *.json *.md` in `MANIFEST.in`, and
   `[tool.pytest.ini_options] pythonpath = ["src", "."]` lets plain `pytest`
   import it.
-- EV-ARCH-04: No network, no real model call, no `live` mode. See EV-RUN-01 and
-  EV-RUN-08.
+- EV-ARCH-04: Network capability is confined. Only `evals/live.py` constructs a
+  network transport or imports the runtime's `AnthropicModel`; besides it,
+  only `evals/metering.py` (the metered transport wrapper) and
+  `evals/runner.py` (transport type checks only) import `httpx`. No evals
+  module imports `socket`, `urllib`, `http`, `requests`, `aiohttp`,
+  `anthropic`, `kubernetes` or `ssl`, and no module except `evals/live.py`
+  imports `evals.live`. Without the section 11 opt-in nothing makes a network
+  call. See EV-RUN-01, EV-RUN-08 and EV-LIVE-03.
 
 ## 3. Oracle semantics (`evals/oracle.py`)
 
@@ -269,9 +277,9 @@ all twelve categories.
 ## 5. Runner (`evals/runner.py`)
 
 - EV-RUN-01: `run_case(case, *, mode, model, output_dir, clock=None)` accepts
-  `mode` in `{"replay", "mock", "baseline"}` only (`baseline` added by PR-3,
-  section 10). `"live"` and any other value raise (live needs maintainer
-  decision D8).
+  `mode` in `{"replay", "mock", "baseline", "live"}` only (`baseline` added by
+  PR-3, section 10; `live` by PR-4, section 11, and only with the transport
+  EV-RUN-08 requires). Any other value raises.
 - EV-RUN-02: The case is validated against `case.schema.json`; the oracle runs
   before the runtime, so an out-of-scope or malformed case raises before any
   directory is created or any model is called.
@@ -282,8 +290,8 @@ all twelve categories.
   `Investigator(policy, model, FixtureTools(evidence),
   JsonRepository(output_dir/<case_id>), SystemClock())`, with one submission.
 - EV-RUN-05: Provenance consistency. `replay` requires the persisted record's
-  `metadata.model_provider == "deterministic_replay"`; `mock` requires
-  `"anthropic_api"`; `baseline` requires one of the baseline provenances of
+  `metadata.model_provider == "deterministic_replay"`; `mock` and `live`
+  require `"anthropic_api"`; `baseline` requires one of the baseline provenances of
   EV-BASE-01; all require `metadata.evidence_provider ==
   "synthetic_fixture"`. A mismatch raises.
 - EV-RUN-06: Grading reuses `agenticdef.cli.assert_expected(record,
@@ -303,10 +311,13 @@ all twelve categories.
   `utcnow()` reports a fixed start plus the elapsed steps, so offline records
   are reproducible. `execute_case` is `run_case` that also returns the
   persisted record.
-- EV-RUN-08: An `anthropic_api` adapter without an injected transport would use
-  the network and is refused in every mode, before `output_dir` is created and
-  before any call is made. `mock` mode therefore only works with an injected
-  (mock) transport.
+- EV-RUN-08: Before `output_dir` is created and before any call is made: an
+  `anthropic_api` adapter without an injected transport would use the network
+  and is refused in every mode; it is refused in `replay` and `baseline`
+  mode; in `mock` mode its transport must be an `httpx.MockTransport`; in
+  `live` mode it must be the section 11 `MeteredTransport`. A `live` run with
+  any other model is refused. So a mock run can never reach the network and a
+  network run can never be labeled mock.
 
 ## 6. Report (`evals/runner.py`, `evals/schemas/report.schema.json`)
 
@@ -333,7 +344,8 @@ all twelve categories.
 ## 7. Fail-closed rules (summary)
 
 Raise: unsupported mode; invalid case; out-of-scope or malformed oracle input;
-existing `output_dir`; provenance mismatch; network-capable adapter; invalid
+existing `output_dir`; provenance mismatch; an adapter whose transport does not
+match its mode; a live run outside its protocol (section 11); invalid
 `repo_sha`; empty or duplicated report cases; schema-invalid report. Fail the
 case (`passed: false` with `error`): missing, non-terminal, result-less or
 schema-invalid record. Label `unresolved`: missing or ambiguous required read.
@@ -365,8 +377,9 @@ schema-invalid record. Label `unresolved`: missing or ambiguous required read.
 10. `run_case` submits once; duplicate delivery (S05's `submissions: 3`) stays a
     runtime replay gate.
 11. `mock` mode exercises the HTTP adapter against scripted responses, not a
-    real model's accuracy or prompt-injection resistance. Evidence is always
-    `synthetic_fixture`; there is no live evidence.
+    real model's accuracy or prompt-injection resistance. `live` mode (section
+    11) calls a real model, but the evidence is still `synthetic_fixture`;
+    there is no live evidence.
 12. `repo_sha` records `HEAD` only; a dirty working tree is not detected.
 13. Under `ReplayModel`, the four documented F2 variants complete as
     `likely_benign/low` while the oracle says `suspicious`; the report
@@ -560,9 +573,10 @@ number is computed from persisted records graded against the oracle.
   `EvalError` before any run, whatever the type of the bad value. Before any
   check, `evaluate` takes private snapshots of its inputs: the set as a JSON
   round trip (a set that is not JSON raises `EvalError`), each provider dict,
-  `families` and `output_dir` as an absolute `Path`. Checks, runs and the report use only
-  the snapshots, so nothing a factory does to the caller's objects can change
-  what was checked, where records are written or what the report says.
+  `families` and `output_dir` as an absolute `Path`. Checks, runs and the
+  report use only the snapshots, so nothing a factory does to the caller's
+  objects can change what was checked, where records are written or what the
+  report says.
   Factories still run in-process with the caller's privileges: the snapshots
   protect the data `evaluate` owns, they are not a sandbox.
 - EV-MET-09: Stale or edited sets are rejected before any run: the set must
@@ -593,3 +607,112 @@ numbers describe the harness and its test doubles, not a real model.
 `runtime_seconds` under `StepClock` counts clock reads, not wall time. The
 design-effect Wilson interval is an approximation that is loose with few
 clusters. Oracle blind spots (section 8) carry into every metric.
+
+## 11. Live runs (`evals/live.py`, `evals/metering.py`, `evals/schemas/protocol.schema.json`, `evals/schemas/live-run.schema.json`, `evals/protocols/`)
+
+PR-4, maintainer decision D8 (#2, 2026-10-02): adapter shape option A, model
+`claude-sonnet-5-5`, a smoke protocol first (dev split, three families, k=1,
+at most US$10), no retries. A live run measures one real model on synthetic
+cases under a protocol that is committed before the run; every number it
+produces is a probabilistic estimate, while every gate around it (opt-in,
+caps, stop conditions, schemas) is deterministic.
+
+Adapter shape (runtime, tested in `tests/test_anthropic_model.py`): the
+provider adapter ignores `thinking` and `redacted_thinking` content blocks
+and never reads them. Exactly one `text` block must remain; `refusal`,
+`max_tokens`, any other block type, invalid JSON or a schema-invalid value
+still raise `ModelError`. Current models return thinking blocks even when the
+reasoning is not displayed, so without this rule every live call would fail
+closed and measure the adapter instead of the model. No server-side fallback
+is requested: a fallback would let another model answer under this model's
+name.
+
+- EV-LIVE-01: A protocol is a JSON file validated against
+  `protocol.schema.json` (`additionalProperties: false` everywhere):
+  `{protocol_version: "1", protocol_id, decision, operator, purpose,
+  provider: {endpoint, anthropic_version, model, max_tokens, thinking,
+  effort, fallbacks, retries}, set: {generator_version, oracle_version,
+  generator_seed, holdout_fraction, split, families, cases}, k, caps:
+  {max_cost_usd, max_model_calls}, prices: {input_usd_per_mtok,
+  output_usd_per_mtok, cache_write_usd_per_mtok, cache_read_usd_per_mtok,
+  source, as_of}, input_overhead_tokens, data_scope, analysis}`.
+  `protocol_digest` is `"sha256:"` plus the SHA-256 of its canonical JSON
+  (sorted keys, no whitespace).
+- EV-LIVE-02: `check_protocol(protocol)` (used by `load_protocol` and
+  `run_live`) also checks the protocol against the code:
+  `provider.endpoint`, `anthropic_version` and `max_tokens` equal what the
+  adapter sends; `generator_version` and `oracle_version` are the current
+  ones; regenerating the set from `generator_seed` and `holdout_fraction`
+  gives families that all exist, are all in `set.split`, and hold exactly
+  `set.cases` cases; `caps.max_model_calls` is at most `k` times the sum of
+  the cases' `policy.max_model_calls` (a larger cap could never bind). Any
+  mismatch raises `EvalError`. `fallbacks: "none"`, `retries: 0` and distinct
+  families are schema rules.
+- EV-LIVE-03: Opt-in. `python -m evals.live --protocol P --output-dir D
+  --confirm-spend USD` runs only when the environment sets
+  `AGENTICDEF_LIVE_EVAL=1` and a non-empty `ANTHROPIC_API_KEY`,
+  `--confirm-spend` equals `caps.max_cost_usd`, and `git status --porcelain`
+  is empty, so the protocol and code that ran are the recorded `repo_sha`.
+  Otherwise it exits non-zero before any network transport is constructed.
+  Tests and CI never set the opt-in; every test injects the inner transport,
+  so no test opens a connection.
+- EV-LIVE-04: Metering. Every request passes through `MeteredTransport`, which
+  never retries and opens a fresh inner transport per request through its
+  injected `connect` callable (each case runs in its own event loop). Before
+  sending, the request's URL, `model`, `max_tokens` and `anthropic-version`
+  must equal the protocol (stop `request_mismatch`); the call is refused if
+  one more call would exceed `max_model_calls` (stop `max_model_calls`) or if
+  the cost so far plus the call's worst case would exceed `max_cost_usd` (stop
+  `max_cost_usd`). The worst case is `(body bytes + input_overhead_tokens)`
+  priced at the larger of the input and cache-write prices plus `max_tokens`
+  at the output price. After sending: an exception from the inner transport
+  stops the run (`transport_error`), a non-2xx status stops it
+  (`http_status`), a body over 65536 bytes stops it (`response_too_large`),
+  missing or invalid `usage` stops it (`usage_missing`), a `model` other than
+  the protocol's stops it (`served_model_mismatch`), and actual input tokens
+  above the bound, output tokens above `max_tokens` or an actual cost above
+  the worst case stop it (`worst_case_exceeded`). Cost is input, output,
+  cache-write and cache-read tokens times their prices, divided by one
+  million, in exact decimal arithmetic. A sent call whose usage cannot be
+  read, including one the runtime deadline cancels (which ends the case in
+  `BudgetError` but does not stop the run), is charged its worst case and
+  counted in `worst_case_charged`, so the ledger never under-reports spend.
+- EV-LIVE-05: Stop. Once stopped, every later request raises before it
+  reaches the inner transport (so the adapter fails that call closed), and
+  the driver aborts before the next case. A stopped run has `status:
+  "stopped"`, its `stop` names the first condition, and `metrics` is `null`:
+  partial metrics are never reported. The command exits non-zero.
+- EV-LIVE-06: Run. `run_live(protocol, *, output_dir, api_key, repo_sha,
+  connect)` checks the protocol (EV-LIVE-02), requires that `output_dir` does
+  not exist, regenerates the set, and runs `harness.evaluate` with one
+  provider `{name: protocol_id, mode: "live"}` whose factory builds
+  `AnthropicModel(model, api_key, transport=<the metered transport>)`, with
+  the protocol's `k` and families, `clock="system"` (real time, so the
+  runtime's own deadlines are real) and records under `output_dir/runs`. It
+  writes `output_dir/live-run.json`, validated against `live-run.schema.json`:
+  `{live_run_version: "1", protocol_id, protocol_digest, protocol, repo_sha,
+  status: "completed" | "stopped", stop: null | {condition, detail}, ledger:
+  {calls, input_tokens, output_tokens, cache_write_tokens, cache_read_tokens,
+  cost_usd, worst_case_charged, http_statuses}, metrics}`, where `metrics` is
+  the section 10 report of a completed run. The command prints `status`,
+  `stop` and `ledger` and exits 0 only for a completed run.
+- EV-LIVE-07: The smoke protocol `evals/protocols/d8-smoke-sonnet-5-5.json`
+  records decision D8: model `claude-sonnet-5-5`, split `dev`, k=1,
+  `max_cost_usd` 10, and three families picked by a fixed rule (for each
+  oracle label, the smallest family id among dev families whose base case has
+  that label), 20 cases. `max_model_calls` is the sum of those cases'
+  `policy.max_model_calls` (320), so the cost cap binds first. Prices are the
+  first-party list prices cached on 2026-09-25; the operator re-checks them
+  before running and commits a new protocol version if they changed.
+
+Live limitations: a smoke run checks that the adapter, metering and report
+pipeline work against real responses; it makes no accuracy, robustness or
+generalization claim, and the holdout split is not touched. Thinking and
+effort are the API defaults recorded in the protocol, not pinned by the
+adapter. `max_tokens` (4096) includes thinking tokens, so a long reasoning
+turn ends `max_tokens` and fails closed. The runtime deadline
+(`policy.max_runtime_seconds`, 10 s in the generated cases) counts real
+latency under `clock="system"`, so slow responses end in `BudgetError`. The
+input bound assumes a token is at least one byte of the request body; a
+breach stops the run rather than being absorbed. Retention of the synthetic
+cases sent to the API follows the operator's account settings.

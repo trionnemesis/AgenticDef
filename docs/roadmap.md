@@ -75,7 +75,10 @@ observations resolve in opposite directions depending on these answers:
 7. Publication trigger resolved by #17: releases require manual dispatch on
    `main`; pushes may deploy Pages but cannot publish a release. (C)
 8. Which provider API version and model IDs should an opt-in live M6 check use,
-   and under what cost limit? (#2 D8)
+   and under what cost limit? (#2 D8) — answered 2026-10-02: adapter option A
+   (skip thinking blocks), `claude-sonnet-5-5`, a smoke protocol first (20
+   synthetic dev cases, k=1, at most US$10, no retries). The protocol and its
+   metered runner are committed (`evals/SPEC.md` section 11); no paid run yet.
 
 The next candidate is a small external evaluation slice, only after human
 decisions on D4 (semantic-evaluation ownership) and D8 (provider/model/API,
