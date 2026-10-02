@@ -98,4 +98,4 @@ def test_every_spec_requirement_is_tested_and_every_test_reference_exists():
     assert referenced - defined == set(), f"tests cite unknown requirements: {sorted(referenced - defined)}"
     assert defined - referenced == set(), f"requirements without a test: {sorted(defined - referenced)}"
     areas = {i.split("-")[1] for i in defined}
-    assert areas == {"ARCH", "ORC", "CAT", "CASE", "RUN", "REP", "GEN"}
+    assert areas == {"ARCH", "ORC", "CAT", "CASE", "RUN", "REP", "GEN", "BASE", "MET"}

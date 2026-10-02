@@ -277,6 +277,17 @@ def _expected(label):
     }
 
 
+def required_reads(event):
+    """The five required reads of an event as (tool, arguments) pairs, in order."""
+    return _required_reads(_parse_event(deepcopy(event)))
+
+
+def judge(event, evidence):
+    """`evaluate` without the policy precondition: label the evidence collected for an event."""
+    view = _parse_event(deepcopy(event))
+    return _judge(view, deepcopy(evidence), _required_reads(view))
+
+
 def evaluate(case):
     """Return {label, categories, approved, reasons, expected} for a case; raise OracleError if uninterpretable."""
     if not isinstance(case, dict):
@@ -286,12 +297,20 @@ def evaluate(case):
             raise OracleError(f"case missing {key!r}")
     event, policy, evidence = deepcopy(case["event"]), deepcopy(case["policy"]), deepcopy(case["evidence"])
     view = _parse_event(event)
+    _check_evidence(evidence)
+    reads = _required_reads(view)
+    _check_policy(policy, view, reads)
+    return _judge(view, evidence, reads)
+
+
+def _check_evidence(evidence):
     _list(evidence, "evidence")
     for index, entry in enumerate(evidence):
         _object(entry, f"evidence entry {index}")
-    reads = _required_reads(view)
-    _check_policy(policy, view, reads)
 
+
+def _judge(view, evidence, reads):
+    _check_evidence(evidence)
     found, problems = [], []
     for tool, arguments in reads:
         matches = [e for e in evidence if e.get("tool") == tool and e.get("arguments") == arguments]

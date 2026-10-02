@@ -7,6 +7,7 @@ a single submission and adds no capability: no network, no live mode, and git
 """
 import asyncio
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import re
@@ -24,12 +25,14 @@ from agenticdef.domain.errors import ContractError
 from agenticdef.domain.runtime import TERMINAL
 
 from . import oracle
+from .baselines import BASELINE_PROVENANCES
 from .cases import case_digest, load_schema, validate_case
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REPORT_VERSION = "1"
-# Mode -> the model provenance the persisted record must carry. Evidence is always fixture evidence.
-MODE_MODEL_PROVIDER = {"replay": "deterministic_replay", "mock": "anthropic_api"}
+# Mode -> the model provenances the persisted record may carry. Evidence is always fixture evidence.
+MODE_MODEL_PROVIDERS = {"replay": ("deterministic_replay",), "mock": ("anthropic_api",),
+                        "baseline": tuple(sorted(BASELINE_PROVENANCES))}
 EVIDENCE_PROVIDER = "synthetic_fixture"
 CHECK_NAMES = ("status", "risk", "termination_reason", "terminal", "forbidden_tools",
                "required_methods", "grounding", "forbidden_claims")
@@ -42,11 +45,28 @@ class EvalError(Exception):
     """An evaluation request that must not be silently accepted."""
 
 
+class StepClock:
+    """Deterministic clock for evaluation runs only: each monotonic() read advances by `step` seconds."""
+
+    START = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    def __init__(self, step=0.001):
+        self.step, self._reads = step, 0
+
+    def monotonic(self):
+        self._reads += 1
+        return self._reads * self.step
+
+    def utcnow(self):
+        self._reads += 1
+        return (self.START + timedelta(seconds=self._reads * self.step)).isoformat()
+
+
 def _require_mode(mode):
     if mode == "live":
         raise EvalError("mode 'live' is not available: live runs need maintainer decision D8")
-    if not isinstance(mode, str) or mode not in MODE_MODEL_PROVIDER:
-        raise EvalError(f"unsupported mode {mode!r}; expected 'replay' or 'mock'")
+    if not isinstance(mode, str) or mode not in MODE_MODEL_PROVIDERS:
+        raise EvalError(f"unsupported mode {mode!r}; expected 'replay', 'mock' or 'baseline'")
 
 
 def _refuse_network_adapter(model):
@@ -64,9 +84,9 @@ def _provenance(record, model, tools):
 
 
 def _require_provenance(mode, provenance):
-    if (provenance["model_provider"] != MODE_MODEL_PROVIDER[mode]
+    if (provenance["model_provider"] not in MODE_MODEL_PROVIDERS[mode]
             or provenance["evidence_provider"] != EVIDENCE_PROVIDER):
-        raise EvalError(f"provenance mismatch: mode {mode!r} requires {MODE_MODEL_PROVIDER[mode]!r} with "
+        raise EvalError(f"provenance mismatch: mode {mode!r} requires one of {MODE_MODEL_PROVIDERS[mode]!r} with "
                         f"{EVIDENCE_PROVIDER!r} evidence, record has {provenance!r}")
 
 
@@ -115,8 +135,13 @@ def grade_case(case, *, mode, record, tools, provenance, oracle_result=None):
     }
 
 
-def run_case(case, *, mode, model, output_dir):
-    """Run one case through the shared runtime in `replay` or `mock` mode and grade it."""
+def run_case(case, *, mode, model, output_dir, clock=None):
+    """Run one case through the shared runtime in `replay`, `mock` or `baseline` mode and grade it."""
+    return execute_case(case, mode=mode, model=model, output_dir=output_dir, clock=clock)[0]
+
+
+def execute_case(case, *, mode, model, output_dir, clock=None):
+    """`run_case` that also returns the persisted record: (report entry, record)."""
     _require_mode(mode)
     validate_case(case)
     oracle_result = oracle.evaluate(case)
@@ -128,11 +153,13 @@ def run_case(case, *, mode, model, output_dir):
         raise EvalError("output_dir already exists; a cached record must not count as a new execution") from exc
     tools = FixtureTools(case["evidence"])
     investigator = Investigator(policy=case["policy"], model=model, tools=tools,
-                                repository=JsonRepository(output_dir / case["case_id"]), clock=SystemClock())
+                                repository=JsonRepository(output_dir / case["case_id"]),
+                                clock=SystemClock() if clock is None else clock)
     record = asyncio.run(investigator.run(case["event"]))
     provenance = _provenance(record, model, tools)
     _require_provenance(mode, provenance)
-    return grade_case(case, mode=mode, record=record, tools=tools, provenance=provenance, oracle_result=oracle_result)
+    entry = grade_case(case, mode=mode, record=record, tools=tools, provenance=provenance, oracle_result=oracle_result)
+    return entry, record
 
 
 def _assemble(cases, repo_sha):

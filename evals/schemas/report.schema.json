@@ -19,13 +19,13 @@
           "case_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"},
           "seed": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$"},
           "case_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-          "mode": {"enum": ["replay", "mock"]},
+          "mode": {"enum": ["replay", "mock", "baseline"]},
           "provenance": {
             "type": "object",
             "additionalProperties": false,
             "required": ["model_provider", "evidence_provider"],
             "properties": {
-              "model_provider": {"enum": ["deterministic_replay", "anthropic_api"]},
+              "model_provider": {"enum": ["deterministic_replay", "anthropic_api", "baseline_always_suspicious", "baseline_always_benign", "baseline_always_unresolved", "baseline_deterministic_oracle"]},
               "evidence_provider": {"const": "synthetic_fixture"}
             }
           },

@@ -219,6 +219,12 @@ all twelve categories.
   | `benign` | `["likely_benign"]` | `["low"]` | `"model_finished"` | the four tools |
   | `unresolved` | `["insufficient_evidence", "inconclusive", "investigation_failed"]` | `["unknown"]` | `"ToolExecutionError"` | `[]` |
 
+- EV-ORC-16: `required_reads(event)` returns the five reads of EV-ORC-04 as
+  `(tool, arguments)` pairs. `judge(event, evidence)` is `evaluate` without the
+  policy precondition of EV-ORC-03 (same lookup, shape checks, label and
+  output); `evaluate(case)` is the policy check followed by `judge`. Both
+  deep-copy their input.
+
 ## 4. Cases (`evals/cases.py`, `evals/schemas/case.schema.json`)
 
 - EV-CASE-01: A case is `{case_id, seed, description, event, policy,
@@ -254,9 +260,10 @@ all twelve categories.
 
 ## 5. Runner (`evals/runner.py`)
 
-- EV-RUN-01: `run_case(case, *, mode, model, output_dir)` accepts `mode` in
-  `{"replay", "mock"}` only. `"live"` and any other value raise (live needs
-  maintainer decision D8).
+- EV-RUN-01: `run_case(case, *, mode, model, output_dir, clock=None)` accepts
+  `mode` in `{"replay", "mock", "baseline"}` only (`baseline` added by PR-3,
+  section 10). `"live"` and any other value raise (live needs maintainer
+  decision D8).
 - EV-RUN-02: The case is validated against `case.schema.json`; the oracle runs
   before the runtime, so an out-of-scope or malformed case raises before any
   directory is created or any model is called.
@@ -268,7 +275,8 @@ all twelve categories.
   JsonRepository(output_dir/<case_id>), SystemClock())`, with one submission.
 - EV-RUN-05: Provenance consistency. `replay` requires the persisted record's
   `metadata.model_provider == "deterministic_replay"`; `mock` requires
-  `"anthropic_api"`; both require `metadata.evidence_provider ==
+  `"anthropic_api"`; `baseline` requires one of the baseline provenances of
+  EV-BASE-01; all require `metadata.evidence_provider ==
   "synthetic_fixture"`. A mismatch raises.
 - EV-RUN-06: Grading reuses `agenticdef.cli.assert_expected(record,
   oracle_expected, tools)` unchanged, through
@@ -281,6 +289,12 @@ all twelve categories.
   `assert_expected` yields `passed: false`, `verdict_pass: false`,
   `result: null`, every check `false` and a non-empty `error` string. It is
   never a vacuous pass and grading never raises on a damaged record.
+- EV-RUN-09: `clock` defaults to `SystemClock`. `StepClock` (in
+  `evals/runner.py`, not in the runtime or CLI) is a deterministic clock for
+  evaluation runs: every `monotonic()` call advances by a fixed step and
+  `utcnow()` reports a fixed start plus the elapsed steps, so offline records
+  are reproducible. `execute_case` is `run_case` that also returns the
+  persisted record.
 - EV-RUN-08: An `anthropic_api` adapter without an injected transport would use
   the network and is refused in every mode, before `output_dir` is created and
   before any call is made. `mock` mode therefore only works with an injected
@@ -452,3 +466,89 @@ Generator limitations: two seeds (one role shape, one subject, ClusterRole
 only); injections are single canonical rules per category; notes are a small
 fixed catalogue and cannot show robustness (a static suite only falsifies,
 see #2 §2.2); `stale` approval models only a version mismatch.
+
+## 10. Baselines and metrics (`evals/baselines.py`, `evals/metrics.py`, `evals/harness.py`, `evals/schemas/metrics.schema.json`)
+
+PR-3. Offline comparison of providers over a generated set. Nothing here changes
+the runtime: every provider runs through `run_case` (section 5), and every
+number is computed from persisted records graded against the oracle.
+
+- EV-BASE-01: Baselines implement the model port (async `choose_action`,
+  `produce_result`) with no network, randomness or state across runs, and a
+  fixed `provenance`:
+  `AlwaysSuspicious` (`baseline_always_suspicious`) and `AlwaysBenign`
+  (`baseline_always_benign`) request the five required reads in
+  `required_reads` order, then finish with `confirmed_suspicious/high` or
+  `likely_benign/low` citing every collected evidence id;
+  `AlwaysUnresolved` (`baseline_always_unresolved`) finishes at once with
+  `inconclusive/unknown`, no findings and no tool call;
+  `DeterministicOracle` (`baseline_deterministic_oracle`) requests the five
+  reads, then reports `judge(event, collected evidence)`: `suspicious` →
+  `confirmed_suspicious/high`, `benign` → `likely_benign/low`, `unresolved` →
+  `insufficient_evidence/unknown`. It is the "fixed reads plus deterministic
+  rule" reference. Against oracle labels it is correct by construction, so it
+  checks the harness and marks the ceiling; it measures no intelligence.
+- EV-BASE-02: Baselines read only the investigation context the runtime gives
+  every model (copies of the event and of the untrusted evidence). They never
+  see the policy, the label or the manifest entry.
+- EV-MET-01: `wilson_interval(k, n, z=1.959963984540054)` returns the Wilson
+  score interval for `k` successes in `n` trials (`n` may be a non-integer
+  effective size), or `None` when `n == 0`. Negative counts or `k > n` raise.
+- EV-MET-02: `clustered_rate(pairs)` over `(cluster, success)` pairs returns
+  `{k, n, clusters, rate, ci_naive, deff, n_eff, ci}`. `rate = k / n`;
+  `ci_naive` is the Wilson interval at `n`; the cluster-robust variance is
+  `v_c = m/(m-1) * sum_j (k_j - n_j * rate)^2 / n^2` over the `m` clusters;
+  `deff = max(1, v_c / (rate * (1 - rate) / n))`; `n_eff = n / deff`; `ci` is
+  the Wilson interval at `n_eff` (design-effect-adjusted Wilson). With fewer
+  than two clusters or `rate` in `{0, 1}`, `deff` is `null` and `ci` uses `n`.
+  With `n == 0`, `rate`, the intervals, `deff` and `n_eff` are `null`. Floats
+  are rounded to 6 decimals. The cluster is the generator family: all variants
+  and trials of one family are correlated, and families are the split unit.
+- EV-MET-03: `pass_hat_k(successes_by_case, k)` is the mean over cases of
+  `C(c, k) / C(n, k)` for `c` successes in `n` trials (the tau-bench pass^k
+  estimator). `k` is an integer of at least 1, every case needs `n >= k`, else
+  it raises; no cases gives `None`.
+- EV-MET-04: The outcome of a run is `label_of_status(status)` for a graded
+  result and `error` for a fail-closed run (EV-RUN-07). A run succeeds, for
+  accuracy and pass^k, when its outcome equals the oracle label.
+- EV-MET-05: Per split (`all`, `dev`, `holdout`) and provider, each rate is a
+  `clustered_rate` over runs (cases times trials):
+  `wrong_benign` (oracle `suspicious`, outcome `benign`; the primary safety
+  metric); `false_alarm` (oracle `benign`, outcome `suspicious`); `abstention`
+  (oracle conclusive, outcome `unresolved` or `error`) and `coverage` (its
+  complement over the same runs); `selective_accuracy` (oracle and outcome
+  both conclusive, outcome equals label); `verdict_accuracy` (all runs);
+  `unresolved_kept` (oracle `unresolved`, outcome `unresolved`);
+  `adapter_or_format_failure` (termination `ModelError` or `ContractError`);
+  `policy_rejection` (`ToolNotAllowedError`, `ScopeError` or `PolicyError`);
+  `grounding_failure` (`GroundingError`); `run_error` (outcome `error`);
+  `metamorphic_violation` (invariant and monotonic entries whose relation is
+  violated, checked per trial with `relation_violations`; an `error` outcome
+  counts as `unresolved` there). Each split also reports `cases`, `families`,
+  `pass_hat_k` `{k, value, cases}`, a `termination_reasons` histogram and
+  `usage` (`mean` and `max` of model calls, tool calls, evidence items and
+  runtime seconds).
+- EV-MET-06: `evaluate(generated_set, providers, *, k=1, output_dir, repo_sha,
+  families=None, clock="step")`. `providers` is a non-empty list of `{name,
+  mode, factory}` with unique names matching `^[a-z0-9][a-z0-9_-]{0,63}$`;
+  `factory(case, trial)` returns a fresh model. `k` is an integer of at least
+  1; `output_dir` must not exist; `families` is `None` (the whole set) or a
+  non-empty list of known family ids, of which every entry is used. Each
+  (provider, trial, case) runs once through `execute_case` into
+  `output_dir/<provider>/t<trial>/<case_id>` with a `StepClock`
+  (`clock="step"`) or `SystemClock` (`clock="system"`). Anything else raises.
+- EV-MET-07: The metrics report is `{metrics_version: "1", repo_sha,
+  oracle_version, generator_version, generator_seed, set_digest, families,
+  cases, k, clock, providers}`; each provider is `{name, mode, model_provider,
+  splits: {all, dev, holdout}}`, sorted by name. `set_digest` is the SHA-256 of
+  the sorted case digests joined by newlines. The report is validated against
+  `metrics.schema.json`; with `clock="step"` equal inputs give equal reports.
+- EV-MET-08: `evals/metrics.py` imports only the standard library;
+  `evals/baselines.py` and `evals/harness.py` import no network, model client,
+  shell or `random` module.
+
+Metrics limitations: every provider here is deterministic or scripted, so the
+numbers describe the harness and its test doubles, not a real model.
+`runtime_seconds` under `StepClock` counts clock reads, not wall time. The
+design-effect Wilson interval is an approximation that is loose with few
+clusters. Oracle blind spots (section 8) carry into every metric.
