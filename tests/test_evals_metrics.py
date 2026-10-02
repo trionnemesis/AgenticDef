@@ -477,6 +477,20 @@ def test_uninterpretable_edited_cases_raise_eval_error_before_any_run(gen, tmp_p
     assert not (tmp_path / "out").exists()
 
 
+def test_edited_cases_whose_digest_no_longer_matches_are_rejected_before_any_run(gen, tmp_path):
+    """[EV-MET-09] An edit that keeps the case valid and its oracle output unchanged still changes what runs, so a
+    stored digest that no longer matches the case fails the pre-run check; set_digest never names another set."""
+    chosen = family(gen, "approved", "bind_verb")
+    edited = deepcopy(gen)
+    case = [e for e in edited["entries"] if e["family"] == chosen][-1]["case"]
+    case["policy"]["max_tool_calls"] -= 1
+    assert oracle.evaluate(case)["label"] == oracle.evaluate(
+        [e for e in gen["entries"] if e["case"]["case_id"] == case["case_id"]][0]["case"])["label"]
+    with pytest.raises(EvalError, match="digest"):
+        evaluate(edited, baseline_providers()[:1], k=1, output_dir=tmp_path / "out", repo_sha=SHA, families=[chosen])
+    assert not (tmp_path / "out").exists()
+
+
 def test_runs_are_scored_against_the_oracle_they_computed(gen, tmp_path, monkeypatch):
     """[EV-MET-09] If a run's own oracle result differed from the stored label, the harness raises instead of
     scoring against the stored one."""

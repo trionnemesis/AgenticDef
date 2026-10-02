@@ -558,12 +558,12 @@ number is computed from persisted records graded against the oracle.
   (`clock="step"`) or `SystemClock` (`clock="system"`). Anything else raises.
 - EV-MET-09: Stale or edited sets are rejected before any run: the set's
   `oracle_version` must equal `ORACLE_VERSION`, and for every chosen entry the
-  case must pass `validate_case` and `evaluate(case)`, and the stored `oracle`
-  (`label`, `categories`) must equal `evaluate(case)` now; otherwise
-  `EvalError` (a `CaseError` or `OracleError` is wrapped, never leaked). Runs
-  are scored against the oracle result the run itself computed (the report
-  entry's `oracle`), and a run whose computed label differs from the stored
-  one raises.
+  case must pass `validate_case` and `evaluate(case)`, the stored `digest` must
+  equal `case_digest(case)`, and the stored `oracle` (`label`, `categories`)
+  must equal `evaluate(case)` now; otherwise `EvalError` (a `CaseError` or
+  `OracleError` is wrapped, never leaked). Runs are scored against the oracle
+  result the run itself computed (the report entry's `oracle`), and a run
+  whose computed label differs from the stored one raises.
 - EV-MET-07: The metrics report is `{metrics_version: "1", repo_sha,
   oracle_version, generator_version, generator_seed, set_digest, families,
   cases, k, clock, providers}`; each provider is `{name, mode, model_provider,

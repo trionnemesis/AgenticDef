@@ -14,7 +14,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from agenticdef.adapters.clock import SystemClock
 
 from . import oracle
-from .cases import CaseError, load_schema, validate_case
+from .cases import CaseError, case_digest, load_schema, validate_case
 from .generate import label_of_status, relation_violations
 from .metrics import summarize
 from .runner import MODE_MODEL_PROVIDERS, SHA, EvalError, StepClock, execute_case
@@ -60,9 +60,9 @@ def _check_request(generated_set, providers, k, output_dir, repo_sha, families, 
         raise EvalError("output_dir already exists; cached records must not count as new runs")
 
 
-def _check_stored_labels(entries):
-    """Stale or edited sets never run: each case must be valid and its stored oracle output must equal the
-    oracle's output now."""
+def _check_stored_entries(entries):
+    """Stale or edited sets never run: each case must be valid, match its stored digest, and its stored oracle
+    output must equal the oracle's output now."""
     for entry in entries:
         case = entry["case"]
         try:
@@ -70,6 +70,8 @@ def _check_stored_labels(entries):
         except (CaseError, oracle.OracleError) as exc:
             case_id = case.get("case_id") if isinstance(case, dict) else None
             raise EvalError(f"case {case_id!r} of the set is uninterpretable: {exc}") from exc
+        if entry["digest"] != case_digest(case):
+            raise EvalError(f"stored digest of {case['case_id']!r} no longer matches the case")
         if entry["oracle"] != {"label": result["label"], "categories": result["categories"]}:
             raise EvalError(f"stored oracle output of {entry['case']['case_id']!r} differs from the oracle now")
 
@@ -109,7 +111,7 @@ def evaluate(generated_set, providers, *, k=1, output_dir, repo_sha, families=No
     _check_request(generated_set, providers, k, output_dir, repo_sha, families, clock)
     chosen = set(families) if families is not None else {entry["family"] for entry in generated_set["entries"]}
     entries = [deepcopy(entry) for entry in generated_set["entries"] if entry["family"] in chosen]
-    _check_stored_labels(entries)
+    _check_stored_entries(entries)
     output_dir = Path(output_dir)
     summaries = []
     for provider in sorted(providers, key=lambda p: p["name"]):
