@@ -99,7 +99,7 @@
       "required": ["name", "mode", "model_provider", "splits"],
       "properties": {
         "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"},
-        "mode": {"enum": ["replay", "mock", "baseline"]},
+        "mode": {"enum": ["replay", "mock", "baseline", "live"]},
         "model_provider": {"type": "string", "minLength": 1, "maxLength": 64},
         "splits": {
           "type": "object",

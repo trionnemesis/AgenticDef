@@ -173,19 +173,55 @@ def test_mock_mode_inverted_verdict_fails(tmp_path):
 
 # ---------------------------------------------------------------- run_case errors
 
-@pytest.mark.parametrize("mode", ["live", "Replay", "", None, "replay,mock"])
-def test_only_replay_and_mock_modes_exist(tmp_path, mode):
-    """[EV-RUN-01] [EV-ARCH-04] live (maintainer decision D8) and anything else raise before any work."""
+@pytest.mark.parametrize("mode", ["Live", "Replay", "", None, "replay,mock", ["live"]])
+def test_only_the_four_modes_exist(tmp_path, mode):
+    """[EV-RUN-01] Anything but replay, mock, baseline and live raises before any work."""
     out = tmp_path / "out"
     with pytest.raises(EvalError, match="mode"):
         run_case(scenario("S01"), mode=mode, model=ReplayModel(), output_dir=out)
     assert not out.exists()
 
 
-def test_live_mode_error_names_the_pending_decision(tmp_path):
-    """[EV-RUN-01] The refusal explains why live is unavailable."""
-    with pytest.raises(EvalError, match="D8"):
-        run_case(scenario("S01"), mode="live", model=ReplayModel(), output_dir=tmp_path / "out")
+def _metered(handler):
+    from evals.live import load_protocol
+    from evals.metering import MeteredTransport
+    return MeteredTransport(load_protocol(ROOT / "evals" / "protocols" / "d8-smoke-sonnet-5-5.json"),
+                            connect=lambda: httpx.MockTransport(handler))
+
+
+def test_live_mode_runs_only_an_api_adapter_over_the_metered_transport(tmp_path):
+    """[EV-RUN-01] [EV-RUN-08] live refuses the replay double and an adapter over a mock transport, before any
+    call or directory."""
+    out = tmp_path / "out"
+    with pytest.raises(EvalError, match="live"):
+        run_case(scenario("S01"), mode="live", model=ReplayModel(), output_dir=out)
+    case = scenario("S01")
+    model, provider = mock_model(case["event"], "confirmed_suspicious", "high")
+    with pytest.raises(EvalError, match="MeteredTransport"):
+        run_case(case, mode="live", model=model, output_dir=out)
+    assert not out.exists() and provider.envelopes == []
+
+
+def test_mock_mode_refuses_a_transport_that_could_reach_the_network(tmp_path):
+    """[EV-RUN-08] [EV-ARCH-04] mock needs an httpx.MockTransport: the metered (network) transport or any other
+    transport is refused before a request is sent, so a network run can never be labeled mock."""
+    sent = []
+    out = tmp_path / "out"
+    for transport in (_metered(lambda request: sent.append(request)), httpx.AsyncBaseTransport()):
+        model = AnthropicModel(model="claude-sonnet-5-5", api_key="test-placeholder", transport=transport)
+        with pytest.raises(EvalError, match="MockTransport"):
+            run_case(scenario("S01"), mode="mock", model=model, output_dir=out)
+    assert sent == [] and not out.exists()
+
+
+@pytest.mark.parametrize("mode", ["replay", "baseline"])
+def test_offline_modes_refuse_an_api_adapter_before_any_call(tmp_path, mode):
+    """[EV-RUN-05] [EV-RUN-08] replay and baseline never run an anthropic_api adapter, not even over a mock."""
+    case = scenario("S01")
+    model, provider = mock_model(case["event"], "confirmed_suspicious", "high")
+    with pytest.raises(EvalError, match="provenance"):
+        run_case(case, mode=mode, model=model, output_dir=tmp_path / "out")
+    assert provider.envelopes == [] and not (tmp_path / "out").exists()
 
 
 def test_replay_mode_rejects_a_real_model_adapter(tmp_path):
@@ -209,7 +245,7 @@ def test_provenance_requires_fixture_evidence(monkeypatch, tmp_path):
         replay(scenario("S01"), tmp_path)
 
 
-@pytest.mark.parametrize("mode", ["replay", "mock"])
+@pytest.mark.parametrize("mode", ["replay", "mock", "baseline", "live"])
 def test_adapter_without_injected_transport_is_refused_before_any_call(monkeypatch, tmp_path, mode):
     """[EV-RUN-08] [EV-ARCH-04] An anthropic_api adapter that would use the network never runs."""
     monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: pytest.fail("network client constructed"))
@@ -407,7 +443,7 @@ def test_grade_case_rejects_an_unsupported_mode(tmp_path):
     """[EV-RUN-01] The grading entry point has the same mode gate."""
     record, tools = s01_record(tmp_path)
     with pytest.raises(EvalError, match="mode"):
-        grade_case(scenario("S01"), mode="live", record=record, tools=tools, provenance=REPLAY)
+        grade_case(scenario("S01"), mode="Live", record=record, tools=tools, provenance=REPLAY)
 
 
 # ---------------------------------------------------------------- report
@@ -440,7 +476,7 @@ def test_build_report_rejects_a_case_counted_twice(sample):
     pytest.param(lambda e: e.pop("case_digest"), id="missing-field"),
     pytest.param(lambda e: e.update(extra=1), id="extra-field"),
     pytest.param(lambda e: e["result"]["budget_usage"].update(runtime_seconds=0.1), id="runtime-seconds"),
-    pytest.param(lambda e: e.update(mode="live"), id="live-mode"),
+    pytest.param(lambda e: e.update(mode="Live"), id="unknown-mode"),
 ])
 def test_build_report_validates_before_returning(sample, mutate):
     """[EV-REP-01] A malformed case result raises instead of producing a report."""
@@ -467,7 +503,7 @@ SCHEMA_VIOLATIONS = [
     pytest.param(lambda r: r["cases"][0].update(extra=1), id="case-extra"),
     pytest.param(lambda r: r["cases"][0].update(case_digest="sha256:abc"), id="case_digest"),
     pytest.param(lambda r: r["cases"][0].update(case_id="S01"), id="case_id"),
-    pytest.param(lambda r: r["cases"][0].update(mode="live"), id="mode"),
+    pytest.param(lambda r: r["cases"][0].update(mode="Live"), id="mode"),
     pytest.param(lambda r: r["cases"][0].update(passed=1), id="passed-type"),
     pytest.param(lambda r: r["cases"][0].update(error=5), id="error-type"),
     pytest.param(lambda r: r["cases"][0]["provenance"].update(model_provider="other"), id="model_provider"),
