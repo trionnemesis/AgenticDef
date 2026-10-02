@@ -461,6 +461,22 @@ def test_stale_or_edited_sets_are_rejected_before_any_run(gen, tmp_path, tamper)
     assert not (tmp_path / "out").exists()
 
 
+@pytest.mark.parametrize("tamper, cause", [
+    (lambda case: next(e for e in case["evidence"] if e["tool"] == "get_approval_record")["data"].pop("approved"),
+     "approval data missing"),
+    (lambda case: case.update(extra=1), "additionalProperties"),
+])
+def test_uninterpretable_edited_cases_raise_eval_error_before_any_run(gen, tmp_path, tamper, cause):
+    """[EV-MET-09] An edited case the oracle or the case schema rejects fails the pre-run check with EvalError,
+    even when it is not the family's first case."""
+    chosen = family(gen, "approved", "bind_verb")
+    edited = deepcopy(gen)
+    tamper([e for e in edited["entries"] if e["family"] == chosen][-1]["case"])
+    with pytest.raises(EvalError, match=cause):
+        evaluate(edited, baseline_providers()[:1], k=1, output_dir=tmp_path / "out", repo_sha=SHA, families=[chosen])
+    assert not (tmp_path / "out").exists()
+
+
 def test_runs_are_scored_against_the_oracle_they_computed(gen, tmp_path, monkeypatch):
     """[EV-MET-09] If a run's own oracle result differed from the stored label, the harness raises instead of
     scoring against the stored one."""

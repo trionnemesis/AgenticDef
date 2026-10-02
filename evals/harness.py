@@ -14,7 +14,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from agenticdef.adapters.clock import SystemClock
 
 from . import oracle
-from .cases import load_schema
+from .cases import CaseError, load_schema, validate_case
 from .generate import label_of_status, relation_violations
 from .metrics import summarize
 from .runner import MODE_MODEL_PROVIDERS, SHA, EvalError, StepClock, execute_case
@@ -61,9 +61,15 @@ def _check_request(generated_set, providers, k, output_dir, repo_sha, families, 
 
 
 def _check_stored_labels(entries):
-    """Stale or edited sets never run: each stored oracle output must equal the oracle's output now."""
+    """Stale or edited sets never run: each case must be valid and its stored oracle output must equal the
+    oracle's output now."""
     for entry in entries:
-        result = oracle.evaluate(entry["case"])
+        case = entry["case"]
+        try:
+            result = oracle.evaluate(validate_case(case))
+        except (CaseError, oracle.OracleError) as exc:
+            case_id = case.get("case_id") if isinstance(case, dict) else None
+            raise EvalError(f"case {case_id!r} of the set is uninterpretable: {exc}") from exc
         if entry["oracle"] != {"label": result["label"], "categories": result["categories"]}:
             raise EvalError(f"stored oracle output of {entry['case']['case_id']!r} differs from the oracle now")
 
