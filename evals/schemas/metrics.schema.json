@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EvaluationMetricsReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["metrics_version", "repo_sha", "oracle_version", "generator_version", "generator_seed", "set_digest",
+               "families", "cases", "k", "clock", "providers"],
+  "properties": {
+    "metrics_version": {"const": "1"},
+    "repo_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "oracle_version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "generator_version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "generator_seed": {"type": "integer", "minimum": 0},
+    "set_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "families": {"type": "integer", "minimum": 1},
+    "cases": {"type": "integer", "minimum": 1},
+    "k": {"type": "integer", "minimum": 1},
+    "clock": {"enum": ["step", "system"]},
+    "providers": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/provider"}}
+  },
+  "$defs": {
+    "interval": {
+      "anyOf": [
+        {"type": "null"},
+        {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": 0, "maximum": 1}}
+      ]
+    },
+    "nullable_number": {"anyOf": [{"type": "null"}, {"type": "number", "minimum": 0}]},
+    "rate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["k", "n", "clusters", "rate", "ci_naive", "deff", "n_eff", "ci"],
+      "properties": {
+        "k": {"type": "integer", "minimum": 0},
+        "n": {"type": "integer", "minimum": 0},
+        "clusters": {"type": "integer", "minimum": 0},
+        "rate": {"anyOf": [{"type": "null"}, {"type": "number", "minimum": 0, "maximum": 1}]},
+        "ci_naive": {"$ref": "#/$defs/interval"},
+        "deff": {"anyOf": [{"type": "null"}, {"type": "number", "minimum": 1}]},
+        "n_eff": {"$ref": "#/$defs/nullable_number"},
+        "ci": {"$ref": "#/$defs/interval"}
+      }
+    },
+    "stat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mean", "max"],
+      "properties": {"mean": {"$ref": "#/$defs/nullable_number"}, "max": {"$ref": "#/$defs/nullable_number"}}
+    },
+    "split": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cases", "families", "wrong_benign", "false_alarm", "abstention", "coverage",
+                   "selective_accuracy", "verdict_accuracy", "unresolved_kept", "adapter_or_format_failure",
+                   "policy_rejection", "grounding_failure", "run_error", "metamorphic_violation", "pass_hat_k",
+                   "termination_reasons", "usage"],
+      "properties": {
+        "cases": {"type": "integer", "minimum": 0},
+        "families": {"type": "integer", "minimum": 0},
+        "wrong_benign": {"$ref": "#/$defs/rate"},
+        "false_alarm": {"$ref": "#/$defs/rate"},
+        "abstention": {"$ref": "#/$defs/rate"},
+        "coverage": {"$ref": "#/$defs/rate"},
+        "selective_accuracy": {"$ref": "#/$defs/rate"},
+        "verdict_accuracy": {"$ref": "#/$defs/rate"},
+        "unresolved_kept": {"$ref": "#/$defs/rate"},
+        "adapter_or_format_failure": {"$ref": "#/$defs/rate"},
+        "policy_rejection": {"$ref": "#/$defs/rate"},
+        "grounding_failure": {"$ref": "#/$defs/rate"},
+        "run_error": {"$ref": "#/$defs/rate"},
+        "metamorphic_violation": {"$ref": "#/$defs/rate"},
+        "pass_hat_k": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["k", "value", "cases"],
+          "properties": {
+            "k": {"type": "integer", "minimum": 1},
+            "value": {"anyOf": [{"type": "null"}, {"type": "number", "minimum": 0, "maximum": 1}]},
+            "cases": {"type": "integer", "minimum": 0}
+          }
+        },
+        "termination_reasons": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+        "usage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model_calls", "tool_calls", "evidence_items", "runtime_seconds"],
+          "properties": {
+            "model_calls": {"$ref": "#/$defs/stat"},
+            "tool_calls": {"$ref": "#/$defs/stat"},
+            "evidence_items": {"$ref": "#/$defs/stat"},
+            "runtime_seconds": {"$ref": "#/$defs/stat"}
+          }
+        }
+      }
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "mode", "model_provider", "splits"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"},
+        "mode": {"enum": ["replay", "mock", "baseline"]},
+        "model_provider": {"type": "string", "minLength": 1, "maxLength": 64},
+        "splits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["all", "dev", "holdout"],
+          "properties": {"all": {"$ref": "#/$defs/split"}, "dev": {"$ref": "#/$defs/split"},
+                         "holdout": {"$ref": "#/$defs/split"}}
+        }
+      }
+    }
+  }
+}
