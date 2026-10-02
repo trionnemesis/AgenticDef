@@ -9,6 +9,7 @@ from copy import deepcopy
 from datetime import datetime
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -577,6 +578,23 @@ def test_factories_cannot_change_the_checked_set_or_providers(gen, tmp_path):
     assert [p["name"] for p in out["providers"]] == ["a", "b"]
     assert sorted(path.name for path in tmp_path.iterdir()) == ["out"]
     assert sorted(path.name for path in (tmp_path / "out").iterdir()) == ["a", "b"]
+
+
+def test_a_factory_that_changes_directory_cannot_move_the_records(gen, tmp_path, monkeypatch):
+    """[EV-MET-06] A relative output_dir is anchored when it is snapshotted, so os.chdir in a factory does not
+    change where records are written."""
+    (tmp_path / "home").mkdir()
+    (tmp_path / "elsewhere").mkdir()
+    monkeypatch.chdir(tmp_path / "home")
+
+    def wandering(case, trial):
+        os.chdir(tmp_path / "elsewhere")
+        return DeterministicOracle()
+
+    evaluate(gen, [{"name": "w", "mode": "baseline", "factory": wandering}], k=1, output_dir="out", repo_sha=SHA,
+             families=[family(gen, "approved", "bind_verb")])
+    assert sorted(path.name for path in (tmp_path / "home" / "out" / "w" / "t0").iterdir())
+    assert list((tmp_path / "elsewhere").iterdir()) == []
 
 
 @pytest.mark.parametrize("poison", [object(), float("nan")])

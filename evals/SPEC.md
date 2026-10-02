@@ -560,9 +560,11 @@ number is computed from persisted records graded against the oracle.
   `EvalError` before any run, whatever the type of the bad value. Before any
   check, `evaluate` takes private snapshots of its inputs: the set as a JSON
   round trip (a set that is not JSON raises `EvalError`), each provider dict,
-  `families` and `output_dir` as a `Path`. Checks, runs and the report use only
+  `families` and `output_dir` as an absolute `Path`. Checks, runs and the report use only
   the snapshots, so nothing a factory does to the caller's objects can change
   what was checked, where records are written or what the report says.
+  Factories still run in-process with the caller's privileges: the snapshots
+  protect the data `evaluate` owns, they are not a sandbox.
 - EV-MET-09: Stale or edited sets are rejected before any run: the set must
   validate against `generated.schema.json` before any field is read, its
   `oracle_version` must equal `ORACLE_VERSION`, and for every chosen entry the

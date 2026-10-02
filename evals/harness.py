@@ -142,7 +142,7 @@ def _snapshot(generated_set, providers, families, output_dir):
     if isinstance(families, (list, tuple)):
         families = list(families)
     if isinstance(output_dir, (str, os.PathLike)):
-        output_dir = Path(output_dir)
+        output_dir = Path(output_dir).absolute()
     return generated_set, providers, families, output_dir
 
 
