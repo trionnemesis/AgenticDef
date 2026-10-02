@@ -491,6 +491,67 @@ def test_edited_cases_whose_digest_no_longer_matches_are_rejected_before_any_run
     assert not (tmp_path / "out").exists()
 
 
+def _family_entries(generated_set, family_id):
+    return [e for e in generated_set["entries"] if e["family"] == family_id]
+
+
+@pytest.mark.parametrize("tamper", [
+    lambda s, fam: [e.update(split="holdout" if e["split"] == "dev" else "dev") for e in _family_entries(s, fam)],
+    lambda s, fam: _family_entries(s, fam)[-1]["relation"].update(
+        kind="monotonic" if _family_entries(s, fam)[-1]["relation"]["kind"] == "invariant" else "invariant"),
+    lambda s, fam: _family_entries(s, fam)[-1].update(
+        family=next(e["family"] for e in s["entries"] if e["family"] != fam)),
+    lambda s, fam: _family_entries(s, fam)[-1]["transforms"].append("edited"),
+])
+def test_edited_entry_metadata_is_rejected_before_any_run(gen, tmp_path, tamper):
+    """[EV-MET-09] split, relation, family and other entry fields feed the metrics, so the whole set must equal
+    what generate() produces from its recorded parameters; an edit to any of them never runs."""
+    chosen = family(gen, "approved", "bind_verb")
+    edited = deepcopy(gen)
+    tamper(edited, chosen)
+    with pytest.raises(EvalError, match="generate"):
+        evaluate(edited, baseline_providers()[:1], k=1, output_dir=tmp_path / "out", repo_sha=SHA, families=[chosen])
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_set_saved_as_json_and_reloaded_still_runs(gen, tmp_path):
+    """[EV-MET-09] The reproducibility check compares values, so a set round-tripped through JSON is accepted."""
+    reloaded = json.loads(json.dumps(gen))
+    out = evaluate(reloaded, baseline_providers()[3:4], k=1, output_dir=tmp_path / "out", repo_sha=SHA,
+                   families=[family(gen, "approved", "bind_verb")])
+    assert out["providers"][0]["splits"]["all"]["verdict_accuracy"]["rate"] == 1.0
+
+
+def test_factories_get_their_own_copy_of_the_case(gen, tmp_path):
+    """[EV-MET-06] A factory that mutates the case it is given cannot change the case that runs."""
+    def factory(case, trial):
+        case["policy"]["max_tool_calls"] = 1
+        return DeterministicOracle()
+
+    out = evaluate(gen, [{"name": "mutating", "mode": "baseline", "factory": factory}], k=1,
+                   output_dir=tmp_path / "out", repo_sha=SHA, families=[family(gen, "approved", "bind_verb")])
+    stats = out["providers"][0]["splits"]["all"]
+    assert stats["verdict_accuracy"]["k"] == stats["verdict_accuracy"]["n"]
+    assert set(stats["termination_reasons"]) == {"model_finished"}
+
+
+def test_a_run_whose_case_differs_from_its_stored_digest_raises(gen, tmp_path, monkeypatch):
+    """[EV-MET-09] If the case that was graded no longer matches the stored digest, the harness raises instead of
+    reporting a set_digest that names another set."""
+    from evals import harness
+
+    real = harness.execute_case
+
+    def mutated(case, **kwargs):
+        case["policy"]["max_runtime_seconds"] += 1
+        return real(case, **kwargs)
+
+    monkeypatch.setattr(harness, "execute_case", mutated)
+    with pytest.raises(EvalError, match="digest"):
+        evaluate(gen, baseline_providers()[3:4], k=1, output_dir=tmp_path / "out", repo_sha=SHA,
+                 families=[family(gen, "approved", "bind_verb")])
+
+
 def test_runs_are_scored_against_the_oracle_they_computed(gen, tmp_path, monkeypatch):
     """[EV-MET-09] If a run's own oracle result differed from the stored label, the harness raises instead of
     scoring against the stored one."""

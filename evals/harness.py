@@ -15,7 +15,7 @@ from agenticdef.adapters.clock import SystemClock
 
 from . import oracle
 from .cases import CaseError, case_digest, load_schema, validate_case
-from .generate import label_of_status, relation_violations
+from .generate import GeneratorError, generate, label_of_status, relation_violations
 from .metrics import summarize
 from .runner import MODE_MODEL_PROVIDERS, SHA, EvalError, StepClock, execute_case
 
@@ -76,11 +76,26 @@ def _check_stored_entries(entries):
             raise EvalError(f"stored oracle output of {entry['case']['case_id']!r} differs from the oracle now")
 
 
+def _check_reproducible(generated_set):
+    """Every entry field feeds the metrics, so the set must be exactly what generate() produces from its recorded
+    parameters and the shipped seeds."""
+    try:
+        expected = generate(generator_seed=generated_set.get("generator_seed"),
+                            holdout_fraction=generated_set.get("holdout_fraction"))
+    except GeneratorError as exc:
+        raise EvalError(f"generated set cannot be regenerated: {exc}") from exc
+    if generated_set != expected:
+        raise EvalError("generated set differs from what generate() produces from its recorded parameters and the "
+                        "shipped seeds; regenerate it")
+
+
 def _observation(entry, trial, report_entry, record):
     computed = report_entry["oracle"]["label"]
     if computed != entry["oracle"]["label"]:
         raise EvalError(f"run of {entry['case']['case_id']!r} computed oracle label {computed!r}, "
                         f"stored {entry['oracle']['label']!r}")
+    if report_entry["case_digest"] != entry["digest"]:
+        raise EvalError(f"run of {entry['case']['case_id']!r} graded a case whose digest differs from the stored one")
     if report_entry["error"] is None:
         result = record["result"]
         outcome = label_of_status(result["status"])
@@ -112,6 +127,7 @@ def evaluate(generated_set, providers, *, k=1, output_dir, repo_sha, families=No
     chosen = set(families) if families is not None else {entry["family"] for entry in generated_set["entries"]}
     entries = [deepcopy(entry) for entry in generated_set["entries"] if entry["family"] in chosen]
     _check_stored_entries(entries)
+    _check_reproducible(generated_set)
     output_dir = Path(output_dir)
     summaries = []
     for provider in sorted(providers, key=lambda p: p["name"]):
@@ -119,7 +135,7 @@ def evaluate(generated_set, providers, *, k=1, output_dir, repo_sha, families=No
         for trial in range(k):
             for entry in entries:
                 report_entry, record = execute_case(
-                    entry["case"], mode=provider["mode"], model=provider["factory"](entry["case"], trial),
+                    entry["case"], mode=provider["mode"], model=provider["factory"](deepcopy(entry["case"]), trial),
                     output_dir=output_dir / provider["name"] / f"t{trial}" / entry["case"]["case_id"],
                     clock=CLOCKS[clock]())
                 observations.append(_observation(entry, trial, report_entry, record))

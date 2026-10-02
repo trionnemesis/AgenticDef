@@ -550,9 +550,10 @@ number is computed from persisted records graded against the oracle.
 - EV-MET-06: `evaluate(generated_set, providers, *, k=1, output_dir, repo_sha,
   families=None, clock="step")`. `providers` is a non-empty list of `{name,
   mode, factory}` with unique names matching `^[a-z0-9][a-z0-9_-]{0,63}$`;
-  `factory(case, trial)` returns a fresh model. `k` is an integer of at least
-  1; `output_dir` must not exist; `families` is `None` (the whole set) or a
-  non-empty list of known family ids, of which every entry is used. Each
+  `factory(case, trial)` receives its own deep copy of the case and returns a
+  fresh model. `k` is an integer of at least 1; `output_dir` must not exist;
+  `families` is `None` (the whole set) or a non-empty list of known family
+  ids, of which every entry is used. Each
   (provider, trial, case) runs once through `execute_case` into
   `output_dir/<provider>/t<trial>/<case_id>` with a `StepClock`
   (`clock="step"`) or `SystemClock` (`clock="system"`). Anything else raises.
@@ -561,9 +562,13 @@ number is computed from persisted records graded against the oracle.
   case must pass `validate_case` and `evaluate(case)`, the stored `digest` must
   equal `case_digest(case)`, and the stored `oracle` (`label`, `categories`)
   must equal `evaluate(case)` now; otherwise `EvalError` (a `CaseError` or
-  `OracleError` is wrapped, never leaked). Runs are scored against the oracle
-  result the run itself computed (the report entry's `oracle`), and a run
-  whose computed label differs from the stored one raises.
+  `OracleError` is wrapped, never leaked). The whole set must then equal
+  `generate(generator_seed=..., holdout_fraction=...)` with its recorded
+  parameters and the shipped seeds, so no entry field (`split`, `family`,
+  `relation`, ...) can be edited; otherwise `EvalError`. Runs are scored
+  against the oracle result the run itself computed (the report entry's
+  `oracle`); a run whose computed label differs from the stored one, or whose
+  graded `case_digest` differs from the stored `digest`, raises.
 - EV-MET-07: The metrics report is `{metrics_version: "1", repo_sha,
   oracle_version, generator_version, generator_seed, set_digest, families,
   cases, k, clock, providers}`; each provider is `{name, mode, model_provider,
