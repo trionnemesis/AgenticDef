@@ -368,7 +368,8 @@ schema-invalid record. Label `unresolved`: missing or ambiguous required read.
 
 PR-2. The generator turns the two conclusive seeds into a labeled, seeded case
 set without touching the runtime. Labels come only from the oracle (section 3);
-the generator never writes a label by hand. It uses no `random` module: every
+the generator never writes a label by hand. `GENERATOR_VERSION` is
+`rbac-gen-2` (category-aware split, EV-GEN-09). It uses no `random` module: every
 choice derives from SHA-256 over `(GENERATOR_VERSION, generator_seed, ...)`, so a
 set is identical on every platform and Python version.
 
@@ -439,10 +440,20 @@ set is identical on every platform and Python version.
   `likely_benign` to `benign`, the three unresolved statuses to `unresolved`,
   and raises on anything else.
 - EV-GEN-09: Split. Families, not cases, are split, so every variant of a family
-  lands in the same split. Within each stratum (the oracle label of the family
-  base) families are ordered by a seeded hash and the first
-  `round(n * holdout_fraction)` go to `holdout`, the rest to `dev`; a stratum
-  with at least two families has at least one family in each split.
+  lands in the same split. Strata combine the oracle label of the family base
+  with what the family exercises: `(suspicious, <category>)` for a family
+  whose base is suspicious (its injection's category), `(benign, <kind>)` for
+  a complete-evidence family whose base is benign (the injection kind:
+  `privileged` for an approved escalation, `benign`, `near-miss`, `removal`,
+  `pre-existing`), and `(unresolved, <evidence mode>)` for a missing-evidence
+  family. Within each stratum families are ordered by a seeded hash and the
+  first `round(n * holdout_fraction)` go to `holdout`, the rest to `dev`; a
+  stratum with at least two families has at least one family in each split.
+  So every escalation category has suspicious families in both splits, and
+  small strata can make the effective holdout share exceed
+  `holdout_fraction` (a two-family stratum always splits one and one).
+  Stratifying by label alone (`rbac-gen-1`) let the default holdout draw its
+  suspicious families only from categories the replay double misses.
 - EV-GEN-10: Entries. Each entry is `{case, family, family_key:
   {approval_mode, injection, evidence_mode}, variant, split, relation:
   {kind, base_case_id}, transforms, oracle: {label, categories}, digest}`.

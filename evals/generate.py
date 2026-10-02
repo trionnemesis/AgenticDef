@@ -19,7 +19,7 @@ from agenticdef.domain.errors import ContractError
 from . import oracle
 from .cases import CaseError, case_digest, load_schema, scenario_case, validate_case
 
-GENERATOR_VERSION = "rbac-gen-1"
+GENERATOR_VERSION = "rbac-gen-2"
 ROOT = Path(__file__).resolve().parents[1]
 
 APPROVAL_MODES = ("unapproved", "approved", "stale")
@@ -396,10 +396,19 @@ def _check_catalogue(injection, evidence_mode, result):
         raise GeneratorError(f"catalogue drift: {injection['id']} grants {result['categories']}")
 
 
-def _assign_splits(base_entries, generator_seed, holdout_fraction):
+def _stratum(label, injection, evidence_mode):
+    """(label, category) for suspicious bases, (label, injection kind) for benign, (label, evidence mode) otherwise."""
+    if label == "suspicious":
+        return label, injection["category"]
+    if label == "benign":
+        return label, injection["kind"]
+    return label, evidence_mode
+
+
+def _assign_splits(stratum_of_family, generator_seed, holdout_fraction):
     strata = defaultdict(list)
-    for entry in base_entries:
-        strata[entry["oracle"]["label"]].append(entry["family"])
+    for family, stratum in stratum_of_family.items():
+        strata[stratum].append(family)
     splits = {}
     for families in strata.values():
         families.sort(key=lambda family: _h(generator_seed, "split", family))
@@ -419,7 +428,7 @@ def generate(seed_cases=None, *, generator_seed=0, holdout_fraction=0.3):
     seeds = deepcopy(seed_cases)
     _check_seeds(seeds)
 
-    entries, base_entries = [], []
+    entries, base_entries, stratum_of_family = [], [], {}
     for mode, injection, evidence_mode in _families():
         family_key = {"approval_mode": mode, "injection": injection["id"], "evidence_mode": evidence_mode}
         family_id = "f-" + _h(generator_seed, "family", mode, injection["id"], evidence_mode)[:10]
@@ -440,6 +449,7 @@ def generate(seed_cases=None, *, generator_seed=0, holdout_fraction=0.3):
                 _check_catalogue(injection, evidence_mode, result)
                 base = entry
                 base_entries.append(entry)
+                stratum_of_family[family_id] = _stratum(result["label"], injection, evidence_mode)
             elif variant == "monotonic":
                 entry["relation"] = {"kind": "monotonic", "base_case_id": base["case"]["case_id"]}
                 if not set(base["oracle"]["categories"]) <= set(entry["oracle"]["categories"]):
@@ -456,7 +466,7 @@ def generate(seed_cases=None, *, generator_seed=0, holdout_fraction=0.3):
     violations = relation_violations(entries, labels.__getitem__)
     if violations:
         raise GeneratorError(f"oracle labels violate {len(violations)} relation(s)")
-    splits = _assign_splits(base_entries, generator_seed, holdout_fraction)
+    splits = _assign_splits(stratum_of_family, generator_seed, holdout_fraction)
     for entry in entries:
         entry["split"] = splits[entry["family"]]
     entries.sort(key=lambda entry: entry["case"]["case_id"])

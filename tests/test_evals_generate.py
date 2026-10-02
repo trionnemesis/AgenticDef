@@ -417,19 +417,43 @@ def test_label_of_status_rejects_unknown_values(status):
 
 # ------------------------------------------------------------------ split
 
-def test_split_is_by_family_and_stratified(gen):
-    """[EV-GEN-09] Variants share their family's split; each label stratum has round(n*f) holdout families."""
+def stratum(base):
+    label, key = base["oracle"]["label"], base["family_key"]
+    if label == "suspicious":
+        return label, next(i["category"] for i in INJECTIONS if i["id"] == key["injection"])
+    if label == "benign":
+        return label, next(i["kind"] for i in INJECTIONS if i["id"] == key["injection"])
+    return label, key["evidence_mode"]
+
+
+def test_split_is_by_family_and_stratified_by_label_and_category(gen):
+    """[EV-GEN-09] Variants share their family's split; each (label, category or kind) stratum has round(n*f)."""
     strata = defaultdict(list)
     for members in by_family(gen).values():
         base = next(e for e in members if e["variant"] == "base")
-        strata[base["oracle"]["label"]].append(base["split"])
-    for label, splits in strata.items():
+        strata[stratum(base)].append(base["split"])
+    assert len(strata) == len(oracle.CATEGORY_IDS) + 5 + 2
+    for key, splits in strata.items():
         n = len(splits)
         expected = round(n * 0.3)
         if n >= 2:
             expected = min(max(expected, 1), n - 1)
-        assert splits.count("holdout") == expected, label
-        assert splits.count("dev") == n - expected, label
+        assert splits.count("holdout") == expected, key
+        assert splits.count("dev") == n - expected, key
+
+
+def test_every_category_has_suspicious_families_in_both_splits(gen):
+    """[EV-GEN-09] No escalation category is missing from dev or holdout, so per-category gaps show in both."""
+    seen = defaultdict(set)
+    for entry in gen["entries"]:
+        if entry["variant"] == "base" and entry["oracle"]["label"] == "suspicious":
+            seen[stratum(entry)[1]].add(entry["split"])
+    assert seen == {category: {"dev", "holdout"} for category in oracle.CATEGORY_IDS}
+
+
+def test_generator_version_names_the_split_rule():
+    """[EV-GEN-09] The category-aware split is rbac-gen-2; the label-only split was rbac-gen-1."""
+    assert GENERATOR_VERSION == "rbac-gen-2"
 
 
 def test_holdout_fraction_changes_the_split_only(gen):
