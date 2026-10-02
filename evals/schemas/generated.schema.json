@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GeneratedCaseSet",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["generator_version", "oracle_version", "generator_seed", "holdout_fraction", "seed_digests", "entries",
+               "summary"],
+  "properties": {
+    "generator_version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "oracle_version": {"type": "string", "minLength": 1, "maxLength": 64},
+    "generator_seed": {"type": "integer", "minimum": 0},
+    "holdout_fraction": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
+    "seed_digests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["S01", "S02"],
+      "properties": {"S01": {"$ref": "#/$defs/digest"}, "S02": {"$ref": "#/$defs/digest"}}
+    },
+    "entries": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/entry"}},
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["families", "cases", "by_split", "by_label"],
+      "properties": {
+        "families": {"type": "integer", "minimum": 1},
+        "cases": {"type": "integer", "minimum": 1},
+        "by_split": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["dev", "holdout"],
+          "properties": {"dev": {"$ref": "#/$defs/count"}, "holdout": {"$ref": "#/$defs/count"}}
+        },
+        "by_label": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["benign", "suspicious", "unresolved"],
+          "properties": {
+            "benign": {"$ref": "#/$defs/count"},
+            "suspicious": {"$ref": "#/$defs/count"},
+            "unresolved": {"$ref": "#/$defs/count"}
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "count": {"type": "integer", "minimum": 0},
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "case_id": {"type": "string", "pattern": "^g-[0-9a-f]{12}$"},
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case", "family", "family_key", "variant", "split", "relation", "transforms", "oracle", "digest"],
+      "properties": {
+        "case": {"type": "object"},
+        "family": {"type": "string", "pattern": "^f-[0-9a-f]{10}$"},
+        "family_key": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["approval_mode", "injection", "evidence_mode"],
+          "properties": {
+            "approval_mode": {"enum": ["unapproved", "approved", "stale"]},
+            "injection": {"type": "string", "minLength": 1, "maxLength": 64},
+            "evidence_mode": {"enum": ["complete", "missing-approval", "missing-before"]}
+          }
+        },
+        "variant": {"enum": ["base", "rename", "reorder", "split-rule", "note-neutral", "note-claims-approval",
+                             "note-claims-benign", "monotonic"]},
+        "split": {"enum": ["dev", "holdout"]},
+        "relation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "base_case_id"],
+          "properties": {
+            "kind": {"enum": ["base", "invariant", "monotonic"]},
+            "base_case_id": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/case_id"}]}
+          }
+        },
+        "transforms": {"type": "array", "minItems": 4, "items": {"type": "string", "minLength": 1, "maxLength": 128}},
+        "oracle": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["label", "categories"],
+          "properties": {
+            "label": {"enum": ["suspicious", "benign", "unresolved"]},
+            "categories": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+          }
+        },
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

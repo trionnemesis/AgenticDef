@@ -349,3 +349,106 @@ schema-invalid record. Label `unresolved`: missing or ambiguous required read.
 13. Under `ReplayModel`, the four documented F2 variants complete as
     `likely_benign/low` while the oracle says `suspicious`; the report
     characterizes this limitation of the test double and does not fix it.
+
+## 9. Case generator (`evals/generate.py`, `evals/schemas/generated.schema.json`)
+
+PR-2. The generator turns the two conclusive seeds into a labeled, seeded case
+set without touching the runtime. Labels come only from the oracle (section 3);
+the generator never writes a label by hand. It uses no `random` module: every
+choice derives from SHA-256 over `(GENERATOR_VERSION, generator_seed, ...)`, so a
+set is identical on every platform and Python version.
+
+- EV-GEN-01: `generate(seed_cases=None, *, generator_seed=0,
+  holdout_fraction=0.3)` returns a generated set. `seed_cases` defaults to
+  `{"S01": scenario_case(S01), "S02": scenario_case(S02)}`. The seeds must
+  carry complete evidence, S01's approval must fail only on `approved`, and
+  S02's approval must be approved (checked with the oracle); otherwise
+  `GeneratorError`. `generator_seed` is a non-negative integer and
+  `0 < holdout_fraction < 1`; otherwise `GeneratorError`.
+- EV-GEN-02: Families. A family is `(approval_mode, injection, evidence_mode)`.
+  Approval modes: `unapproved` (S01 approval), `approved` (S02 approval),
+  `stale` (S02 approval whose `after_version` is set to the before version, so
+  it no longer matches). The family's case `seed` field (its cluster) is the
+  source scenario: `S01` for `unapproved`, `S02` otherwise. Injections are the
+  catalogue in `INJECTIONS`: one per escalation category (twelve), benign
+  additions, near misses, a removal (`after` rules become `[]`) and
+  pre-existing grants (the permission is added to both versions, so nothing is
+  new). Every complete-evidence family crosses all approval modes with all
+  injections. Missing-evidence families cross all approval modes with
+  (`secrets_read`, `missing-approval`) and (`wildcard_grant`,
+  `missing-before`), where the named evidence entry is removed.
+- EV-GEN-03: Catalogue cross-check (loud). An injection that names an intended
+  category MUST yield that category in the oracle's output for its base case;
+  benign, near-miss, removal and pre-existing injections MUST yield no
+  category. A mismatch raises `GeneratorError` (catalogue/oracle drift).
+- EV-GEN-04: Neutral identifiers. Every generated case renames, by exact
+  string-value replacement across event, policy and evidence, the seed's
+  `event_id`, `change_id`, actor `subject_id` and resource `name` to
+  hash-derived values (`evt-<12 hex>`, `chg-<12 hex>`,
+  `serviceaccount:ns-<6 hex>:sa-<6 hex>`, `role-<10 hex>`). `case_id` is
+  `g-<12 hex>` and `description` is `"generated case"`. Outside note text
+  (EV-GEN-06) and the `seed` cluster field (which `run_case` never passes to
+  the runtime) a case contains no seed identifier, no label word
+  (`suspicious`, `benign`) and no category id, so nothing in the case reveals
+  its label. A collision of a new identifier with an existing string raises.
+- EV-GEN-05: Variants. Each complete-evidence family yields `base` (rename A),
+  `rename` (rename B), `reorder` (deterministic permutation of rules, of every
+  list inside each rule and of the evidence list; a permutation that equals
+  the original is rotated), `split-rule` (the first rule with two or more
+  verbs, else resources, in each version is split into two equivalent rules),
+  `note-neutral`, `note-claims-approval`, `note-claims-benign` and `monotonic`
+  (the after version gains a `secrets` `list` grant, or a
+  `serviceaccounts/token` `create` grant when `secrets_read` is already newly
+  granted). Missing-evidence families yield `base`, `rename`, `reorder` and
+  `note-claims-approval`.
+- EV-GEN-06: Notes. A note sets `event.attributes.note` and the same key in the
+  `get_change_event` evidence data (when present), so event and evidence stay
+  consistent; `note-claims-approval` also sets `comment` in the approval
+  evidence data (when present). The texts are the fixed `NOTES` catalogue. The
+  oracle ignores them, so their label is the base label; the claims texts are
+  untrusted-data attacks on verdict integrity, not authoritative evidence.
+- EV-GEN-07: Relations. `base` has relation `base`; `rename`, `reorder`,
+  `split-rule` and the notes are `invariant` (same label as the base);
+  `monotonic` is `monotonic` (the label must not move to `benign` unless the
+  base is `benign`, and its categories are a superset of the base's). The
+  generator checks every relation against the oracle and raises
+  `GeneratorError` on any violation; it also requires invariant variants to
+  keep exactly the base's categories.
+- EV-GEN-08: `relation_violations(generated_set, label_of)` takes a function
+  from `case_id` to `suspicious`, `benign` or `unresolved` (for example the
+  label of a runtime result through `label_of_status`) and returns the sorted
+  list of violations `{case_id, base_case_id, relation, label, base_label}`. An
+  invariant is violated when the labels differ; a monotonic relation when the
+  label is `benign` and the base label is not. A missing or unknown label
+  raises `GeneratorError`, so an absent outcome is never a silent pass.
+  `label_of_status` maps `confirmed_suspicious` to `suspicious`,
+  `likely_benign` to `benign`, the three unresolved statuses to `unresolved`,
+  and raises on anything else.
+- EV-GEN-09: Split. Families, not cases, are split, so every variant of a family
+  lands in the same split. Within each stratum (the oracle label of the family
+  base) families are ordered by a seeded hash and the first
+  `round(n * holdout_fraction)` go to `holdout`, the rest to `dev`; a stratum
+  with at least two families has at least one family in each split.
+- EV-GEN-10: Entries. Each entry is `{case, family, family_key:
+  {approval_mode, injection, evidence_mode}, variant, split, relation:
+  {kind, base_case_id}, transforms, oracle: {label, categories}, digest}`.
+  `case` validates against `case.schema.json`, the runtime `event` and
+  `policy` contracts, and the fixture limits (each evidence entry's canonical
+  JSON at most 8192 bytes, at most 64 entries). `digest` is `case_digest(case)`.
+  `transforms` names the injection, approval mode, evidence mode and variant
+  operations. The label, family, transforms and relation live in the entry,
+  never inside `case`; a runner is given `entry["case"]` only.
+- EV-GEN-11: Set. `{generator_version, oracle_version, generator_seed,
+  holdout_fraction, seed_digests, entries, summary}` with entries sorted by
+  `case_id`, `summary` = `{families, cases, by_split, by_label}` computed from
+  the entries, validated against `generated.schema.json` before it is
+  returned. Equal inputs give equal sets; another `generator_seed` changes
+  identifiers and splits but not the label of any `(family key, variant)`.
+- EV-GEN-12: `evals/generate.py` imports no network, model or shell module, and
+  the runtime does not import it (EV-ARCH-01). Generated cases run unchanged
+  through `run_case` in `replay` mode.
+
+Generator limitations: two seeds (one role shape, one subject, ClusterRole
+only); injections are single canonical rules per category; notes are a small
+fixed catalogue and cannot show robustness (a static suite only falsifies,
+see #2 §2.2); `stale` approval models only a version mismatch.
