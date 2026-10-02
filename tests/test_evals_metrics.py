@@ -9,6 +9,7 @@ from copy import deepcopy
 from datetime import datetime
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -402,9 +403,12 @@ def test_reports_are_reproducible_with_the_step_clock(gen, tmp_path):
     ({"providers": [{"name": "x", "mode": "baseline"}]}, "provider"),
     ({"families": []}, "famil"), ({"families": ["f-0000000000"]}, "famil"),
     ({"clock": "wall"}, "clock"), ({"repo_sha": "abc"}, "repo_sha"),
+    ({"clock": ["step"]}, "clock"), ({"families": [["x"]]}, "famil"), ({"output_dir": None}, "output_dir"),
+    ({"providers": [{"name": "x", "mode": ["baseline"], "factory": lambda c, t: AlwaysBenign()}]}, "mode"),
 ])
 def test_evaluate_rejects_bad_requests(gen, three_families, tmp_path, change, match):
-    """[EV-MET-06] Invalid k, providers, families, clock or sha raise before any run."""
+    """[EV-MET-06] Invalid k, providers, families, clock, output_dir or sha raise EvalError before any run, even
+    when the value is of a type the check cannot hash or open."""
     kwargs = {"providers": baseline_providers()[:1], "k": 1, "output_dir": tmp_path / "out", "repo_sha": SHA,
               "families": three_families[:1], "clock": "step", **change}
     with pytest.raises(EvalError, match=match):
@@ -444,6 +448,200 @@ def test_a_fail_closed_run_is_counted_not_crashed(gen, tmp_path, monkeypatch):
     assert (stats["run_error"]["k"], stats["abstention"]["k"], stats["wrong_benign"]["k"]) == (1, 1, 0)
     assert stats["termination_reasons"]["none"] == 1
     assert (stats["metamorphic_violation"]["k"], stats["metamorphic_violation"]["n"]) == (6, 7)
+
+
+@pytest.mark.parametrize("tamper", [
+    lambda s, fam: s.update(oracle_version="rbac-oracle-0"),
+    lambda s, fam: next(e for e in s["entries"] if e["family"] == fam)["oracle"].update(label="benign"),
+    lambda s, fam: next(e for e in s["entries"] if e["family"] == fam)["oracle"].update(categories=[]),
+])
+def test_stale_or_edited_sets_are_rejected_before_any_run(gen, tmp_path, tamper):
+    """[EV-MET-09] A set whose oracle version or stored oracle output disagrees with the oracle now never runs."""
+    chosen = family(gen, "unapproved", "secrets_read")
+    edited = deepcopy(gen)
+    tamper(edited, chosen)
+    with pytest.raises(EvalError, match="oracle"):
+        evaluate(edited, baseline_providers()[:1], k=1, output_dir=tmp_path / "out", repo_sha=SHA, families=[chosen])
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize("tamper, cause", [
+    (lambda case: next(e for e in case["evidence"] if e["tool"] == "get_approval_record")["data"].pop("approved"),
+     "approval data missing"),
+    (lambda case: case.update(extra=1), "additionalProperties"),
+])
+def test_uninterpretable_edited_cases_raise_eval_error_before_any_run(gen, tmp_path, tamper, cause):
+    """[EV-MET-09] An edited case the oracle or the case schema rejects fails the pre-run check with EvalError,
+    even when it is not the family's first case."""
+    chosen = family(gen, "approved", "bind_verb")
+    edited = deepcopy(gen)
+    tamper([e for e in edited["entries"] if e["family"] == chosen][-1]["case"])
+    with pytest.raises(EvalError, match=cause):
+        evaluate(edited, baseline_providers()[:1], k=1, output_dir=tmp_path / "out", repo_sha=SHA, families=[chosen])
+    assert not (tmp_path / "out").exists()
+
+
+def test_edited_cases_whose_digest_no_longer_matches_are_rejected_before_any_run(gen, tmp_path):
+    """[EV-MET-09] An edit that keeps the case valid and its oracle output unchanged still changes what runs, so a
+    stored digest that no longer matches the case fails the pre-run check; set_digest never names another set."""
+    chosen = family(gen, "approved", "bind_verb")
+    edited = deepcopy(gen)
+    case = [e for e in edited["entries"] if e["family"] == chosen][-1]["case"]
+    case["policy"]["max_tool_calls"] -= 1
+    assert oracle.evaluate(case)["label"] == oracle.evaluate(
+        [e for e in gen["entries"] if e["case"]["case_id"] == case["case_id"]][0]["case"])["label"]
+    with pytest.raises(EvalError, match="digest"):
+        evaluate(edited, baseline_providers()[:1], k=1, output_dir=tmp_path / "out", repo_sha=SHA, families=[chosen])
+    assert not (tmp_path / "out").exists()
+
+
+def _without(mapping, key):
+    mapping = deepcopy(mapping)
+    del mapping[key]
+    return mapping
+
+
+@pytest.mark.parametrize("malformed", [
+    lambda s: [],
+    lambda s: _without(s, "entries"),
+    lambda s: {**s, "entries": [_without(s["entries"][0], "family"), *s["entries"][1:]]},
+    lambda s: {**s, "entries": ["not an entry", *s["entries"][1:]]},
+])
+def test_malformed_sets_raise_eval_error_before_any_field_is_read(gen, tmp_path, malformed):
+    """[EV-MET-09] A set that is not shaped like generated.schema.json raises EvalError, not KeyError, TypeError
+    or AttributeError."""
+    with pytest.raises(EvalError, match="schema"):
+        evaluate(malformed(gen), baseline_providers()[:1], k=1, output_dir=tmp_path / "out", repo_sha=SHA)
+    assert not (tmp_path / "out").exists()
+
+
+def _family_entries(generated_set, family_id):
+    return [e for e in generated_set["entries"] if e["family"] == family_id]
+
+
+@pytest.mark.parametrize("tamper", [
+    lambda s, fam: [e.update(split="holdout" if e["split"] == "dev" else "dev") for e in _family_entries(s, fam)],
+    lambda s, fam: _family_entries(s, fam)[-1]["relation"].update(
+        kind="monotonic" if _family_entries(s, fam)[-1]["relation"]["kind"] == "invariant" else "invariant"),
+    lambda s, fam: _family_entries(s, fam)[-1].update(
+        family=next(e["family"] for e in s["entries"] if e["family"] != fam)),
+    lambda s, fam: _family_entries(s, fam)[-1]["transforms"].append("edited"),
+])
+def test_edited_entry_metadata_is_rejected_before_any_run(gen, tmp_path, tamper):
+    """[EV-MET-09] split, relation, family and other entry fields feed the metrics, so the whole set must equal
+    what generate() produces from its recorded parameters; an edit to any of them never runs."""
+    chosen = family(gen, "approved", "bind_verb")
+    edited = deepcopy(gen)
+    tamper(edited, chosen)
+    with pytest.raises(EvalError, match="generate"):
+        evaluate(edited, baseline_providers()[:1], k=1, output_dir=tmp_path / "out", repo_sha=SHA, families=[chosen])
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_set_saved_as_json_and_reloaded_still_runs(gen, tmp_path):
+    """[EV-MET-09] The reproducibility check compares values, so a set round-tripped through JSON is accepted."""
+    reloaded = json.loads(json.dumps(gen))
+    out = evaluate(reloaded, baseline_providers()[3:4], k=1, output_dir=tmp_path / "out", repo_sha=SHA,
+                   families=[family(gen, "approved", "bind_verb")])
+    assert out["providers"][0]["splits"]["all"]["verdict_accuracy"]["rate"] == 1.0
+
+
+def test_factories_get_their_own_copy_of_the_case(gen, tmp_path):
+    """[EV-MET-06] A factory that mutates the case it is given cannot change the case that runs."""
+    def factory(case, trial):
+        case["policy"]["max_tool_calls"] = 1
+        return DeterministicOracle()
+
+    out = evaluate(gen, [{"name": "mutating", "mode": "baseline", "factory": factory}], k=1,
+                   output_dir=tmp_path / "out", repo_sha=SHA, families=[family(gen, "approved", "bind_verb")])
+    stats = out["providers"][0]["splits"]["all"]
+    assert stats["verdict_accuracy"]["k"] == stats["verdict_accuracy"]["n"]
+    assert set(stats["termination_reasons"]) == {"model_finished"}
+
+
+def test_factories_cannot_change_the_checked_set_or_providers(gen, tmp_path):
+    """[EV-MET-06] A factory that closes over the caller's set or provider list cannot change the report's
+    provenance or move another provider's records outside output_dir: evaluate works on private snapshots."""
+    original = deepcopy(gen)
+    providers = [{"name": "a", "mode": "baseline", "factory": None},
+                 {"name": "b", "mode": "baseline", "factory": lambda case, trial: DeterministicOracle()}]
+
+    def meddling(case, trial):
+        original.update(generator_seed=7, generator_version="rbac-gen-edited")
+        providers[1]["name"] = "../escaped"
+        return DeterministicOracle()
+
+    providers[0]["factory"] = meddling
+    out = evaluate(original, providers, k=1, output_dir=tmp_path / "out", repo_sha=SHA,
+                   families=[family(gen, "approved", "bind_verb")])
+    assert (out["generator_seed"], out["generator_version"]) == (gen["generator_seed"], gen["generator_version"])
+    assert [p["name"] for p in out["providers"]] == ["a", "b"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["out"]
+    assert sorted(path.name for path in (tmp_path / "out").iterdir()) == ["a", "b"]
+
+
+def test_a_factory_that_changes_directory_cannot_move_the_records(gen, tmp_path, monkeypatch):
+    """[EV-MET-06] A relative output_dir is anchored when it is snapshotted, so os.chdir in a factory does not
+    change where records are written."""
+    (tmp_path / "home").mkdir()
+    (tmp_path / "elsewhere").mkdir()
+    monkeypatch.chdir(tmp_path / "home")
+
+    def wandering(case, trial):
+        os.chdir(tmp_path / "elsewhere")
+        return DeterministicOracle()
+
+    evaluate(gen, [{"name": "w", "mode": "baseline", "factory": wandering}], k=1, output_dir="out", repo_sha=SHA,
+             families=[family(gen, "approved", "bind_verb")])
+    assert sorted(path.name for path in (tmp_path / "home" / "out" / "w" / "t0").iterdir())
+    assert list((tmp_path / "elsewhere").iterdir()) == []
+
+
+@pytest.mark.parametrize("poison", [object(), float("nan")])
+def test_a_set_that_is_not_json_raises_eval_error(gen, tmp_path, poison):
+    """[EV-MET-06] The set snapshot is a JSON round trip, so a value JSON cannot hold raises EvalError."""
+    entry = deepcopy(gen["entries"][0])
+    entry["case"]["description"] = poison
+    with pytest.raises(EvalError, match="JSON"):
+        evaluate({**gen, "entries": [entry, *gen["entries"][1:]]}, baseline_providers()[:1], k=1,
+                 output_dir=tmp_path / "out", repo_sha=SHA)
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_run_whose_case_differs_from_its_stored_digest_raises(gen, tmp_path, monkeypatch):
+    """[EV-MET-09] If the case that was graded no longer matches the stored digest, the harness raises instead of
+    reporting a set_digest that names another set."""
+    from evals import harness
+
+    real = harness.execute_case
+
+    def mutated(case, **kwargs):
+        case["policy"]["max_runtime_seconds"] += 1
+        return real(case, **kwargs)
+
+    monkeypatch.setattr(harness, "execute_case", mutated)
+    with pytest.raises(EvalError, match="digest"):
+        evaluate(gen, baseline_providers()[3:4], k=1, output_dir=tmp_path / "out", repo_sha=SHA,
+                 families=[family(gen, "approved", "bind_verb")])
+
+
+def test_runs_are_scored_against_the_oracle_they_computed(gen, tmp_path, monkeypatch):
+    """[EV-MET-09] If a run's own oracle result differed from the stored label, the harness raises instead of
+    scoring against the stored one."""
+    from evals import harness
+
+    chosen = [family(gen, "approved", "bind_verb")]
+    real = harness.execute_case
+
+    def drifted(case, **kwargs):
+        entry, record = real(case, **kwargs)
+        entry = deepcopy(entry)
+        entry["oracle"]["label"] = "suspicious"
+        return entry, record
+
+    monkeypatch.setattr(harness, "execute_case", drifted)
+    with pytest.raises(EvalError, match="oracle"):
+        evaluate(gen, baseline_providers()[:1], k=1, output_dir=tmp_path / "out", repo_sha=SHA, families=chosen)
 
 
 # ------------------------------------------------------------------ seeded stochastic mock over HTTP

@@ -767,3 +767,38 @@ def test_case_schema_file_is_strict_and_local():
     assert schema["properties"]["evidence"]["items"]["additionalProperties"] is False
     assert "$ref" not in text and "http://" not in text
     assert text.count("https://") == 1
+
+
+# ------------------------------------------------------------------ evidence entry shape (Codex review on #20)
+
+def _malformed(tool, mutate):
+    case = deepcopy(scenario_case(ROOT / "scenarios" / "S01"))
+    for entry in case["evidence"]:
+        if entry["tool"] == tool:
+            mutate(entry)
+    return case
+
+
+@pytest.mark.parametrize(("tool", "mutate"), [
+    ("get_change_event", lambda e: e.pop("data")),
+    ("get_change_event", lambda e: e.pop("observed_at")),
+    ("get_change_event", lambda e: e.update(data="not an object")),
+    ("get_subject_bindings", lambda e: e.update(arguments=["serviceaccount:ops:deployer"])),
+    ("get_subject_bindings", lambda e: e.update(observed_at=20260912)),
+    ("get_approval_record", lambda e: e.update(tool=7)),
+    ("get_rbac_object", lambda e: e.update(note="extra key")),
+])
+def test_malformed_evidence_entries_raise_in_evaluate_and_judge(tool, mutate):
+    """[EV-ORC-17] [EV-ORC-02] A malformed entry is never a resolved or a missing read; it raises."""
+    case = _malformed(tool, mutate)
+    with pytest.raises(OracleError):
+        oracle.evaluate(case)
+    with pytest.raises(OracleError):
+        oracle.judge(case["event"], case["evidence"])
+
+
+def test_well_formed_scenarios_still_label():
+    """[EV-ORC-17] The shape rule accepts every shipped scenario fixture."""
+    for name in ("S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08"):
+        assert oracle.evaluate(scenario_case(ROOT / "scenarios" / name))["label"] in {"suspicious", "benign",
+                                                                                       "unresolved"}

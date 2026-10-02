@@ -303,10 +303,23 @@ def evaluate(case):
     return _judge(view, evidence, reads)
 
 
+_ENTRY_KEYS = frozenset({"tool", "arguments", "observed_at", "data"})
+
+
 def _check_evidence(evidence):
+    """Every entry is {tool: str, arguments: object, observed_at: str, data: object}; nothing else is a read."""
     _list(evidence, "evidence")
     for index, entry in enumerate(evidence):
-        _object(entry, f"evidence entry {index}")
+        where = f"evidence entry {index}"
+        _object(entry, where)
+        if isinstance(entry.get("tool"), str):
+            where += f" ({entry['tool']})"
+        if set(entry) != _ENTRY_KEYS:
+            raise OracleError(f"{where} must have exactly the keys {sorted(_ENTRY_KEYS)}")
+        for key in ("tool", "observed_at"):
+            _string(entry, key, where)
+        for key in ("arguments", "data"):
+            _object(entry[key], f"{where}.{key}")
 
 
 def _judge(view, evidence, reads):
