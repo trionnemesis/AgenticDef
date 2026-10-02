@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EvaluationReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["report_version", "repo_sha", "oracle_version", "cases", "summary"],
+  "properties": {
+    "report_version": {"const": "1"},
+    "repo_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "oracle_version": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,63}$"},
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["case_id", "seed", "case_digest", "mode", "provenance", "oracle", "result", "checks", "verdict_pass", "passed", "error"],
+        "properties": {
+          "case_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"},
+          "seed": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$"},
+          "case_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "mode": {"enum": ["replay", "mock"]},
+          "provenance": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["model_provider", "evidence_provider"],
+            "properties": {
+              "model_provider": {"enum": ["deterministic_replay", "anthropic_api"]},
+              "evidence_provider": {"const": "synthetic_fixture"}
+            }
+          },
+          "oracle": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "categories", "approved", "reasons", "expected"],
+            "properties": {
+              "label": {"enum": ["suspicious", "benign", "unresolved"]},
+              "categories": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z_]{0,63}$"}},
+              "approved": {"type": ["boolean", "null"]},
+              "reasons": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 4096}},
+              "expected": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["statuses", "risks", "submissions", "required_methods", "forbidden_tools", "forbidden_claims", "termination_reason"],
+                "properties": {
+                  "statuses": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["confirmed_suspicious", "likely_benign", "insufficient_evidence", "inconclusive", "investigation_failed"]}},
+                  "risks": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["high", "low", "unknown"]}},
+                  "submissions": {"type": "integer", "minimum": 1},
+                  "required_methods": {"type": "array", "uniqueItems": true, "items": {"enum": ["get_change_event", "get_rbac_object", "get_subject_bindings", "get_approval_record"]}},
+                  "forbidden_tools": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 64}},
+                  "forbidden_claims": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 1024}},
+                  "termination_reason": {"type": "string", "minLength": 1, "maxLength": 256}
+                }
+              }
+            }
+          },
+          "result": {
+            "anyOf": [
+              {"type": "null"},
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["state", "status", "risk", "termination_reason", "budget_usage"],
+                "properties": {
+                  "state": {"enum": ["COMPLETED", "INSUFFICIENT_EVIDENCE", "INCONCLUSIVE", "FAILED"]},
+                  "status": {"enum": ["confirmed_suspicious", "likely_benign", "insufficient_evidence", "inconclusive", "investigation_failed"]},
+                  "risk": {"enum": ["high", "low", "unknown"]},
+                  "termination_reason": {"type": "string", "minLength": 1, "maxLength": 256},
+                  "budget_usage": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["model_calls", "tool_calls", "evidence_items"],
+                    "properties": {
+                      "model_calls": {"type": "integer", "minimum": 0},
+                      "tool_calls": {"type": "integer", "minimum": 0},
+                      "evidence_items": {"type": "integer", "minimum": 0}
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "checks": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status", "risk", "termination_reason", "terminal", "forbidden_tools", "required_methods", "grounding", "forbidden_claims"],
+            "properties": {
+              "status": {"type": "boolean"},
+              "risk": {"type": "boolean"},
+              "termination_reason": {"type": "boolean"},
+              "terminal": {"type": "boolean"},
+              "forbidden_tools": {"type": "boolean"},
+              "required_methods": {"type": "boolean"},
+              "grounding": {"type": "boolean"},
+              "forbidden_claims": {"type": "boolean"}
+            }
+          },
+          "verdict_pass": {"type": "boolean"},
+          "passed": {"type": "boolean"},
+          "error": {"type": ["string", "null"], "maxLength": 1024}
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cases", "passed", "failed"],
+      "properties": {
+        "cases": {"type": "integer", "minimum": 1},
+        "passed": {"type": "integer", "minimum": 0},
+        "failed": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}
