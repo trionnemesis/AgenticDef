@@ -225,6 +225,14 @@ all twelve categories.
   output); `evaluate(case)` is the policy check followed by `judge`. Both
   deep-copy their input.
 
+- EV-ORC-17: Evidence entry shape (else `OracleError`), checked by `evaluate`
+  and `judge` themselves, not only by the case schema: each entry is an
+  object with exactly the keys `tool`, `arguments`, `observed_at` and `data`;
+  `tool` and `observed_at` are strings, `arguments` and `data` are objects. A
+  malformed entry never counts as a resolved read or as a missing one.
+  (Before this rule an entry without `data` could resolve a
+  `get_change_event` read, and non-object `arguments` read as missing.)
+
 ## 4. Cases (`evals/cases.py`, `evals/schemas/case.schema.json`)
 
 - EV-CASE-01: A case is `{case_id, seed, description, event, policy,
@@ -548,6 +556,12 @@ number is computed from persisted records graded against the oracle.
   (provider, trial, case) runs once through `execute_case` into
   `output_dir/<provider>/t<trial>/<case_id>` with a `StepClock`
   (`clock="step"`) or `SystemClock` (`clock="system"`). Anything else raises.
+- EV-MET-09: Stale or edited sets are rejected before any run: the set's
+  `oracle_version` must equal `ORACLE_VERSION`, and for every chosen entry the
+  stored `oracle` (`label`, `categories`) must equal `evaluate(case)` now;
+  otherwise `EvalError`. Runs are scored against the oracle result the run
+  itself computed (the report entry's `oracle`), and a run whose computed
+  label differs from the stored one raises.
 - EV-MET-07: The metrics report is `{metrics_version: "1", repo_sha,
   oracle_version, generator_version, generator_seed, set_digest, families,
   cases, k, clock, providers}`; each provider is `{name, mode, model_provider,

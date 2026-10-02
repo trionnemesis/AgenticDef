@@ -49,6 +49,9 @@ def _check_request(generated_set, providers, k, output_dir, repo_sha, families, 
         names.append(provider["name"])
     if len(set(names)) != len(names):
         raise EvalError("provider names must be unique")
+    if generated_set.get("oracle_version") != oracle.ORACLE_VERSION:
+        raise EvalError(f"generated set was labeled by oracle {generated_set.get('oracle_version')!r}, "
+                        f"not {oracle.ORACLE_VERSION!r}; regenerate it")
     known = {entry["family"] for entry in generated_set["entries"]}
     if families is not None:
         if not isinstance(families, (list, tuple)) or not families or not set(families) <= known:
@@ -57,7 +60,19 @@ def _check_request(generated_set, providers, k, output_dir, repo_sha, families, 
         raise EvalError("output_dir already exists; cached records must not count as new runs")
 
 
+def _check_stored_labels(entries):
+    """Stale or edited sets never run: each stored oracle output must equal the oracle's output now."""
+    for entry in entries:
+        result = oracle.evaluate(entry["case"])
+        if entry["oracle"] != {"label": result["label"], "categories": result["categories"]}:
+            raise EvalError(f"stored oracle output of {entry['case']['case_id']!r} differs from the oracle now")
+
+
 def _observation(entry, trial, report_entry, record):
+    computed = report_entry["oracle"]["label"]
+    if computed != entry["oracle"]["label"]:
+        raise EvalError(f"run of {entry['case']['case_id']!r} computed oracle label {computed!r}, "
+                        f"stored {entry['oracle']['label']!r}")
     if report_entry["error"] is None:
         result = record["result"]
         outcome = label_of_status(result["status"])
@@ -66,7 +81,7 @@ def _observation(entry, trial, report_entry, record):
         outcome, termination = "error", None
         usage = {"model_calls": 0, "tool_calls": 0, "evidence_items": 0, "runtime_seconds": 0}
     return {"case_id": entry["case"]["case_id"], "family": entry["family"], "split": entry["split"],
-            "oracle_label": entry["oracle"]["label"], "relation_kind": entry["relation"]["kind"], "trial": trial,
+            "oracle_label": computed, "relation_kind": entry["relation"]["kind"], "trial": trial,
             "outcome": outcome, "termination_reason": termination,
             "usage": {key: usage[key] for key in ("model_calls", "tool_calls", "evidence_items", "runtime_seconds")},
             "model_provider": report_entry["provenance"]["model_provider"]}
@@ -88,6 +103,7 @@ def evaluate(generated_set, providers, *, k=1, output_dir, repo_sha, families=No
     _check_request(generated_set, providers, k, output_dir, repo_sha, families, clock)
     chosen = set(families) if families is not None else {entry["family"] for entry in generated_set["entries"]}
     entries = [deepcopy(entry) for entry in generated_set["entries"] if entry["family"] in chosen]
+    _check_stored_labels(entries)
     output_dir = Path(output_dir)
     summaries = []
     for provider in sorted(providers, key=lambda p: p["name"]):

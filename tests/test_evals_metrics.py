@@ -446,6 +446,40 @@ def test_a_fail_closed_run_is_counted_not_crashed(gen, tmp_path, monkeypatch):
     assert (stats["metamorphic_violation"]["k"], stats["metamorphic_violation"]["n"]) == (6, 7)
 
 
+@pytest.mark.parametrize("tamper", [
+    lambda s, fam: s.update(oracle_version="rbac-oracle-0"),
+    lambda s, fam: next(e for e in s["entries"] if e["family"] == fam)["oracle"].update(label="benign"),
+    lambda s, fam: next(e for e in s["entries"] if e["family"] == fam)["oracle"].update(categories=[]),
+])
+def test_stale_or_edited_sets_are_rejected_before_any_run(gen, tmp_path, tamper):
+    """[EV-MET-09] A set whose oracle version or stored oracle output disagrees with the oracle now never runs."""
+    chosen = family(gen, "unapproved", "secrets_read")
+    edited = deepcopy(gen)
+    tamper(edited, chosen)
+    with pytest.raises(EvalError, match="oracle"):
+        evaluate(edited, baseline_providers()[:1], k=1, output_dir=tmp_path / "out", repo_sha=SHA, families=[chosen])
+    assert not (tmp_path / "out").exists()
+
+
+def test_runs_are_scored_against_the_oracle_they_computed(gen, tmp_path, monkeypatch):
+    """[EV-MET-09] If a run's own oracle result differed from the stored label, the harness raises instead of
+    scoring against the stored one."""
+    from evals import harness
+
+    chosen = [family(gen, "approved", "bind_verb")]
+    real = harness.execute_case
+
+    def drifted(case, **kwargs):
+        entry, record = real(case, **kwargs)
+        entry = deepcopy(entry)
+        entry["oracle"]["label"] = "suspicious"
+        return entry, record
+
+    monkeypatch.setattr(harness, "execute_case", drifted)
+    with pytest.raises(EvalError, match="oracle"):
+        evaluate(gen, baseline_providers()[:1], k=1, output_dir=tmp_path / "out", repo_sha=SHA, families=chosen)
+
+
 # ------------------------------------------------------------------ seeded stochastic mock over HTTP
 
 class StochasticProvider:
