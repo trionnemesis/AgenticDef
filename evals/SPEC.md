@@ -552,12 +552,14 @@ number is computed from persisted records graded against the oracle.
   mode, factory}` with unique names matching `^[a-z0-9][a-z0-9_-]{0,63}$`;
   `factory(case, trial)` receives its own deep copy of the case and returns a
   fresh model. `k` is an integer of at least 1; `output_dir` must not exist;
-  `families` is `None` (the whole set) or a non-empty list of known family
-  ids, of which every entry is used. Each
+  `families` is `None` (the whole set) or a non-empty list of known family id
+  strings, of which every entry is used. Each
   (provider, trial, case) runs once through `execute_case` into
   `output_dir/<provider>/t<trial>/<case_id>` with a `StepClock`
-  (`clock="step"`) or `SystemClock` (`clock="system"`). Anything else raises.
-- EV-MET-09: Stale or edited sets are rejected before any run: the set's
+  (`clock="step"`) or `SystemClock` (`clock="system"`). Anything else raises
+  `EvalError` before any run, whatever the type of the bad value.
+- EV-MET-09: Stale or edited sets are rejected before any run: the set must
+  validate against `generated.schema.json` before any field is read, its
   `oracle_version` must equal `ORACLE_VERSION`, and for every chosen entry the
   case must pass `validate_case` and `evaluate(case)`, the stored `digest` must
   equal `case_digest(case)`, and the stored `oracle` (`label`, `categories`)

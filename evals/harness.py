@@ -6,6 +6,7 @@ record graded against the oracle. Requests are validated before any run.
 """
 from copy import deepcopy
 from hashlib import sha256
+import os
 from pathlib import Path
 import re
 
@@ -25,6 +26,7 @@ SPLITS = ("all", "dev", "holdout")
 CLOCKS = {"step": StepClock, "system": SystemClock}
 
 _METRICS_VALIDATOR = Draft202012Validator(load_schema("metrics.schema.json"), format_checker=FormatChecker())
+_SET_VALIDATOR = Draft202012Validator(load_schema("generated.schema.json"), format_checker=FormatChecker())
 
 
 def _check_request(generated_set, providers, k, output_dir, repo_sha, families, clock):
@@ -32,7 +34,7 @@ def _check_request(generated_set, providers, k, output_dir, repo_sha, families, 
         raise EvalError("k must be an integer of at least 1")
     if not isinstance(repo_sha, str) or not SHA.fullmatch(repo_sha):
         raise EvalError("repo_sha must be 40 lowercase hexadecimal characters")
-    if clock not in CLOCKS:
+    if not isinstance(clock, str) or clock not in CLOCKS:
         raise EvalError(f"clock must be one of {sorted(CLOCKS)}")
     if not isinstance(providers, (list, tuple)) or not providers:
         raise EvalError("at least one provider is required")
@@ -42,20 +44,28 @@ def _check_request(generated_set, providers, k, output_dir, repo_sha, families, 
             raise EvalError("each provider is {name, mode, factory}")
         if not isinstance(provider["name"], str) or not PROVIDER_NAME.fullmatch(provider["name"]):
             raise EvalError(f"invalid provider name {provider['name']!r}")
-        if provider["mode"] not in MODE_MODEL_PROVIDERS:
+        if not isinstance(provider["mode"], str) or provider["mode"] not in MODE_MODEL_PROVIDERS:
             raise EvalError(f"unsupported mode {provider['mode']!r} for provider {provider['name']!r}")
         if not callable(provider["factory"]):
             raise EvalError(f"provider {provider['name']!r} needs a callable factory")
         names.append(provider["name"])
     if len(set(names)) != len(names):
         raise EvalError("provider names must be unique")
-    if generated_set.get("oracle_version") != oracle.ORACLE_VERSION:
-        raise EvalError(f"generated set was labeled by oracle {generated_set.get('oracle_version')!r}, "
+    errors = list(_SET_VALIDATOR.iter_errors(generated_set))
+    if errors:
+        first = min(errors, key=lambda e: (len(e.absolute_path), [str(p) for p in e.absolute_path]))
+        raise EvalError(f"generated set violates its schema at {[str(p) for p in first.absolute_path]} "
+                        f"({first.validator})")
+    if generated_set["oracle_version"] != oracle.ORACLE_VERSION:
+        raise EvalError(f"generated set was labeled by oracle {generated_set['oracle_version']!r}, "
                         f"not {oracle.ORACLE_VERSION!r}; regenerate it")
     known = {entry["family"] for entry in generated_set["entries"]}
     if families is not None:
-        if not isinstance(families, (list, tuple)) or not families or not set(families) <= known:
+        if not isinstance(families, (list, tuple)) or not families \
+                or not all(isinstance(family, str) for family in families) or not set(families) <= known:
             raise EvalError("families must be None or a non-empty list of known family ids")
+    if not isinstance(output_dir, (str, os.PathLike)):
+        raise EvalError("output_dir must be a path")
     if Path(output_dir).exists():
         raise EvalError("output_dir already exists; cached records must not count as new runs")
 
@@ -68,8 +78,7 @@ def _check_stored_entries(entries):
         try:
             result = oracle.evaluate(validate_case(case))
         except (CaseError, oracle.OracleError) as exc:
-            case_id = case.get("case_id") if isinstance(case, dict) else None
-            raise EvalError(f"case {case_id!r} of the set is uninterpretable: {exc}") from exc
+            raise EvalError(f"case {case.get('case_id')!r} of the set is uninterpretable: {exc}") from exc
         if entry["digest"] != case_digest(case):
             raise EvalError(f"stored digest of {case['case_id']!r} no longer matches the case")
         if entry["oracle"] != {"label": result["label"], "categories": result["categories"]}:
@@ -80,8 +89,8 @@ def _check_reproducible(generated_set):
     """Every entry field feeds the metrics, so the set must be exactly what generate() produces from its recorded
     parameters and the shipped seeds."""
     try:
-        expected = generate(generator_seed=generated_set.get("generator_seed"),
-                            holdout_fraction=generated_set.get("holdout_fraction"))
+        expected = generate(generator_seed=generated_set["generator_seed"],
+                            holdout_fraction=generated_set["holdout_fraction"])
     except GeneratorError as exc:
         raise EvalError(f"generated set cannot be regenerated: {exc}") from exc
     if generated_set != expected:

@@ -402,9 +402,12 @@ def test_reports_are_reproducible_with_the_step_clock(gen, tmp_path):
     ({"providers": [{"name": "x", "mode": "baseline"}]}, "provider"),
     ({"families": []}, "famil"), ({"families": ["f-0000000000"]}, "famil"),
     ({"clock": "wall"}, "clock"), ({"repo_sha": "abc"}, "repo_sha"),
+    ({"clock": ["step"]}, "clock"), ({"families": [["x"]]}, "famil"), ({"output_dir": None}, "output_dir"),
+    ({"providers": [{"name": "x", "mode": ["baseline"], "factory": lambda c, t: AlwaysBenign()}]}, "mode"),
 ])
 def test_evaluate_rejects_bad_requests(gen, three_families, tmp_path, change, match):
-    """[EV-MET-06] Invalid k, providers, families, clock or sha raise before any run."""
+    """[EV-MET-06] Invalid k, providers, families, clock, output_dir or sha raise EvalError before any run, even
+    when the value is of a type the check cannot hash or open."""
     kwargs = {"providers": baseline_providers()[:1], "k": 1, "output_dir": tmp_path / "out", "repo_sha": SHA,
               "families": three_families[:1], "clock": "step", **change}
     with pytest.raises(EvalError, match=match):
@@ -488,6 +491,26 @@ def test_edited_cases_whose_digest_no_longer_matches_are_rejected_before_any_run
         [e for e in gen["entries"] if e["case"]["case_id"] == case["case_id"]][0]["case"])["label"]
     with pytest.raises(EvalError, match="digest"):
         evaluate(edited, baseline_providers()[:1], k=1, output_dir=tmp_path / "out", repo_sha=SHA, families=[chosen])
+    assert not (tmp_path / "out").exists()
+
+
+def _without(mapping, key):
+    mapping = deepcopy(mapping)
+    del mapping[key]
+    return mapping
+
+
+@pytest.mark.parametrize("malformed", [
+    lambda s: [],
+    lambda s: _without(s, "entries"),
+    lambda s: {**s, "entries": [_without(s["entries"][0], "family"), *s["entries"][1:]]},
+    lambda s: {**s, "entries": ["not an entry", *s["entries"][1:]]},
+])
+def test_malformed_sets_raise_eval_error_before_any_field_is_read(gen, tmp_path, malformed):
+    """[EV-MET-09] A set that is not shaped like generated.schema.json raises EvalError, not KeyError, TypeError
+    or AttributeError."""
+    with pytest.raises(EvalError, match="schema"):
+        evaluate(malformed(gen), baseline_providers()[:1], k=1, output_dir=tmp_path / "out", repo_sha=SHA)
     assert not (tmp_path / "out").exists()
 
 
