@@ -6,6 +6,7 @@ record graded against the oracle. Requests are validated before any run.
 """
 from copy import deepcopy
 from hashlib import sha256
+import json
 import os
 from pathlib import Path
 import re
@@ -130,14 +131,29 @@ def _violations(entries, observations, k):
     return violated
 
 
+def _snapshot(generated_set, providers, families, output_dir):
+    """Private copies taken before any check, so factories cannot change what was checked."""
+    try:
+        generated_set = json.loads(json.dumps(generated_set, allow_nan=False))
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise EvalError(f"generated set is not JSON: {exc}") from exc
+    if isinstance(providers, (list, tuple)):
+        providers = [dict(provider) if isinstance(provider, dict) else provider for provider in providers]
+    if isinstance(families, (list, tuple)):
+        families = list(families)
+    if isinstance(output_dir, (str, os.PathLike)):
+        output_dir = Path(output_dir)
+    return generated_set, providers, families, output_dir
+
+
 def evaluate(generated_set, providers, *, k=1, output_dir, repo_sha, families=None, clock="step"):
     """Run every provider k times over the chosen families and return the validated metrics report."""
+    generated_set, providers, families, output_dir = _snapshot(generated_set, providers, families, output_dir)
     _check_request(generated_set, providers, k, output_dir, repo_sha, families, clock)
     chosen = set(families) if families is not None else {entry["family"] for entry in generated_set["entries"]}
     entries = [deepcopy(entry) for entry in generated_set["entries"] if entry["family"] in chosen]
     _check_stored_entries(entries)
     _check_reproducible(generated_set)
-    output_dir = Path(output_dir)
     summaries = []
     for provider in sorted(providers, key=lambda p: p["name"]):
         observations = []

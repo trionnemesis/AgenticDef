@@ -558,6 +558,38 @@ def test_factories_get_their_own_copy_of_the_case(gen, tmp_path):
     assert set(stats["termination_reasons"]) == {"model_finished"}
 
 
+def test_factories_cannot_change_the_checked_set_or_providers(gen, tmp_path):
+    """[EV-MET-06] A factory that closes over the caller's set or provider list cannot change the report's
+    provenance or move another provider's records outside output_dir: evaluate works on private snapshots."""
+    original = deepcopy(gen)
+    providers = [{"name": "a", "mode": "baseline", "factory": None},
+                 {"name": "b", "mode": "baseline", "factory": lambda case, trial: DeterministicOracle()}]
+
+    def meddling(case, trial):
+        original.update(generator_seed=7, generator_version="rbac-gen-edited")
+        providers[1]["name"] = "../escaped"
+        return DeterministicOracle()
+
+    providers[0]["factory"] = meddling
+    out = evaluate(original, providers, k=1, output_dir=tmp_path / "out", repo_sha=SHA,
+                   families=[family(gen, "approved", "bind_verb")])
+    assert (out["generator_seed"], out["generator_version"]) == (gen["generator_seed"], gen["generator_version"])
+    assert [p["name"] for p in out["providers"]] == ["a", "b"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["out"]
+    assert sorted(path.name for path in (tmp_path / "out").iterdir()) == ["a", "b"]
+
+
+@pytest.mark.parametrize("poison", [object(), float("nan")])
+def test_a_set_that_is_not_json_raises_eval_error(gen, tmp_path, poison):
+    """[EV-MET-06] The set snapshot is a JSON round trip, so a value JSON cannot hold raises EvalError."""
+    entry = deepcopy(gen["entries"][0])
+    entry["case"]["description"] = poison
+    with pytest.raises(EvalError, match="JSON"):
+        evaluate({**gen, "entries": [entry, *gen["entries"][1:]]}, baseline_providers()[:1], k=1,
+                 output_dir=tmp_path / "out", repo_sha=SHA)
+    assert not (tmp_path / "out").exists()
+
+
 def test_a_run_whose_case_differs_from_its_stored_digest_raises(gen, tmp_path, monkeypatch):
     """[EV-MET-09] If the case that was graded no longer matches the stored digest, the harness raises instead of
     reporting a set_digest that names another set."""

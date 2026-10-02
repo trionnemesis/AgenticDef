@@ -557,7 +557,12 @@ number is computed from persisted records graded against the oracle.
   (provider, trial, case) runs once through `execute_case` into
   `output_dir/<provider>/t<trial>/<case_id>` with a `StepClock`
   (`clock="step"`) or `SystemClock` (`clock="system"`). Anything else raises
-  `EvalError` before any run, whatever the type of the bad value.
+  `EvalError` before any run, whatever the type of the bad value. Before any
+  check, `evaluate` takes private snapshots of its inputs: the set as a JSON
+  round trip (a set that is not JSON raises `EvalError`), each provider dict,
+  `families` and `output_dir` as a `Path`. Checks, runs and the report use only
+  the snapshots, so nothing a factory does to the caller's objects can change
+  what was checked, where records are written or what the report says.
 - EV-MET-09: Stale or edited sets are rejected before any run: the set must
   validate against `generated.schema.json` before any field is read, its
   `oracle_version` must equal `ORACLE_VERSION`, and for every chosen entry the
