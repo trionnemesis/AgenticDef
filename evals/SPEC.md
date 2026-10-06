@@ -636,8 +636,11 @@ name.
   {max_cost_usd, max_model_calls}, prices: {input_usd_per_mtok,
   output_usd_per_mtok, cache_write_usd_per_mtok, cache_read_usd_per_mtok,
   source, as_of}, input_overhead_tokens, data_scope, analysis}`.
-  `protocol_digest` is `"sha256:"` plus the SHA-256 of its canonical JSON
-  (sorted keys, no whitespace).
+  Every number is finite: `NaN` and `±Infinity`, which Python's JSON parser
+  accepts and the schema's bounds cannot reject, raise before the schema is
+  checked. `protocol_digest`
+  is `"sha256:"` plus the SHA-256 of its canonical JSON (sorted keys, no
+  whitespace).
 - EV-LIVE-02: `check_protocol(protocol)` (used by `load_protocol` and
   `run_live`) also checks the protocol against the code:
   `provider.endpoint`, `anthropic_version` and `max_tokens` equal what the
@@ -654,11 +657,13 @@ name.
   `--confirm-spend` equals `caps.max_cost_usd`, `git status --porcelain` is
   empty, and the `--protocol` file resolves (symlinks followed) to a path
   inside the repository whose bytes equal its version at `HEAD` (`git show
-  HEAD:<path>`; an untracked, ignored or outside file has none). The run uses
-  those committed bytes, so the protocol and code that ran are the recorded
-  `repo_sha`. Otherwise it exits non-zero before any network transport is
-  constructed. Tests and CI never set the opt-in; every test injects the inner
-  transport, so no test opens a connection.
+  HEAD:<path>`; an untracked, ignored or outside file has none), and every
+  loaded `agenticdef` and `evals` module comes from this checkout's
+  `src/agenticdef/` and `evals/` (not an installed wheel or another path). The
+  run uses those committed bytes, so the protocol and code that ran are the
+  recorded `repo_sha`. Otherwise it exits non-zero before any network
+  transport is constructed. Tests and CI never set the opt-in; every test
+  injects the inner transport, so no test opens a connection.
 - EV-LIVE-04: Metering. Every request passes through `MeteredTransport`, which
   never retries and opens a fresh inner transport per request through its
   injected `connect` callable (each case runs in its own event loop). Before

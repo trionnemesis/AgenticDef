@@ -12,6 +12,7 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import subprocess
+import types
 
 import httpx
 import pytest
@@ -130,6 +131,29 @@ def test_protocol_schema_violations_raise(tmp_path, breaker):
     path.write_text(json.dumps(broken), encoding="utf-8")
     with pytest.raises(EvalError, match="schema"):
         load_protocol(path)
+
+
+@pytest.mark.parametrize("token", ["NaN", "Infinity", "-Infinity"])
+def test_non_finite_numbers_in_a_protocol_file_raise(tmp_path, token):
+    """[EV-LIVE-01] Python's json accepts NaN and Infinity; a protocol file containing them is refused."""
+    text = SMOKE.read_text(encoding="utf-8").replace('"cache_read_usd_per_mtok": 0.2',
+                                                       f'"cache_read_usd_per_mtok": {token}')
+    assert token in text
+    path = tmp_path / "protocol.json"
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(EvalError, match="finite"):
+        load_protocol(path)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+@pytest.mark.parametrize("section, key", [("prices", "cache_read_usd_per_mtok"), ("caps", "max_cost_usd"),
+                                          ("set", "holdout_fraction")])
+def test_non_finite_numbers_in_a_protocol_dict_raise(value, section, key):
+    """[EV-LIVE-01] The schema's numeric bounds cannot reject NaN, so non-finite numbers are refused first."""
+    broken = raw_protocol()
+    broken[section][key] = value
+    with pytest.raises(EvalError, match=f"{section}.{key} is not a finite number"):
+        check_protocol(broken)
 
 
 def test_a_protocol_file_that_is_not_json_raises(tmp_path):
@@ -472,7 +496,53 @@ def offline_git(monkeypatch):
     monkeypatch.setattr(live, "git_status", lambda: status["porcelain"])
     monkeypatch.setattr(live, "current_repo_sha", lambda: SHA)
     monkeypatch.setattr(live, "committed_bytes", lambda path: Path(path).read_bytes())
+    monkeypatch.setattr(live, "check_runtime_sources", lambda: None)
     return status
+
+
+def _module(name, file):
+    module = types.ModuleType(name)
+    if file is not None:
+        module.__file__ = str(file)
+    return module
+
+
+def _checkout_modules():
+    return {"agenticdef": _module("agenticdef", ROOT / "src" / "agenticdef" / "__init__.py"),
+            "agenticdef.adapters.anthropic_model": _module("x", ROOT / "src" / "agenticdef" / "adapters" / "a.py"),
+            "evals.live": _module("evals.live", ROOT / "evals" / "live.py"),
+            "agenticdef._namespace": _module("agenticdef._namespace", None),
+            "json": _module("json", "/usr/lib/python3/json/__init__.py"), "broken": None}
+
+
+def test_runtime_modules_from_this_checkout_pass():
+    """[EV-LIVE-03] agenticdef and evals modules under this checkout pass; other modules are not judged."""
+    live.check_runtime_sources(modules=_checkout_modules())
+
+
+@pytest.mark.parametrize("name, file", [
+    ("agenticdef.application.investigate", "/usr/lib/python3/site-packages/agenticdef/application/investigate.py"),
+    ("agenticdef", ROOT / "build" / "lib" / "agenticdef" / "__init__.py"),
+    ("evals.metering", "/elsewhere/evals/metering.py"),
+])
+def test_a_runtime_module_loaded_from_elsewhere_refuses_the_run(name, file):
+    """[EV-LIVE-03] If the runtime came from an installed wheel or another path, repo_sha would not name the
+    code that ran, so the run is refused."""
+    modules = {**_checkout_modules(), name: _module(name, file)}
+    with pytest.raises(EvalError, match="not from this checkout"):
+        live.check_runtime_sources(modules=modules)
+
+
+def test_the_command_refuses_runtime_code_from_elsewhere(tmp_path, monkeypatch, offline_git):
+    """[EV-LIVE-03] The command exits 2 before any transport exists when the runtime is not this checkout."""
+    monkeypatch.setattr(live, "network_transport", lambda: pytest.fail("network transport constructed"))
+
+    def elsewhere():
+        raise EvalError("module agenticdef is loaded from /site-packages, not from this checkout")
+
+    monkeypatch.setattr(live, "check_runtime_sources", elsewhere)
+    assert live.main(_argv(tmp_path), env=OPT_IN) == 2
+    assert not (tmp_path / "out").exists()
 
 
 def _git(root, *args):

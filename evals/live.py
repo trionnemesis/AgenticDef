@@ -14,6 +14,7 @@ import argparse
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -44,8 +45,23 @@ def _require_valid(validator, value, what):
         raise EvalError(f"{what} violates its schema at {[str(p) for p in first.absolute_path]} ({first.validator})")
 
 
+def _require_finite(value, where):
+    """JSON Schema bounds cannot reject NaN (every comparison with it is false), so check before the schema."""
+    if isinstance(value, float) and not math.isfinite(value):
+        raise EvalError(f"{where} is not a finite number")
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _require_finite(item, f"{where}.{key}" if where != "protocol" else str(key))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            _require_finite(item, f"{where}[{index}]")
+
+
 def _check(protocol):
-    """Schema, then the code the protocol describes (EV-LIVE-01, EV-LIVE-02). Returns (digest, generated set)."""
+    """Finiteness, schema, then the code the protocol describes (EV-LIVE-01, EV-LIVE-02).
+
+    Returns (digest, generated set)."""
+    _require_finite(protocol, "protocol")
     _require_valid(_PROTOCOL_VALIDATOR, protocol, "protocol")
     provider, chosen = protocol["provider"], protocol["set"]
     for key, sent in (("endpoint", ENDPOINT), ("anthropic_version", ANTHROPIC_VERSION), ("max_tokens", MAX_TOKENS)):
@@ -166,6 +182,17 @@ def committed_bytes(path, root=REPO_ROOT):
     return committed
 
 
+def check_runtime_sources(root=REPO_ROOT, modules=None):
+    """Every loaded agenticdef and evals module must come from this checkout, or repo_sha would not name the code
+    that ran (an installed wheel or another path can shadow it)."""
+    root = Path(root).resolve()
+    homes = {"agenticdef": root / "src" / "agenticdef", "evals": root / "evals"}
+    for name, module in list((sys.modules if modules is None else modules).items()):
+        home, file = homes.get(name.split(".")[0]), getattr(module, "__file__", None)
+        if home is not None and file is not None and not Path(file).resolve().is_relative_to(home):
+            raise EvalError(f"module {name} is loaded from {file}, not from this checkout ({home})")
+
+
 def _refuse(message):
     print(f"refused: {message}", file=sys.stderr)
     return 2
@@ -195,6 +222,7 @@ def main(argv=None, env=None):
             return _refuse(f"--confirm-spend must equal the protocol's caps.max_cost_usd ({cap})")
         if git_status():
             return _refuse("the working tree is not clean; commit the protocol and the code first")
+        check_runtime_sources()
         repo_sha = current_repo_sha()
         result = run_live(protocol, output_dir=args.output_dir, api_key=api_key, repo_sha=repo_sha,
                           connect=network_transport)
