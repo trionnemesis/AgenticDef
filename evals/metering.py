@@ -7,12 +7,16 @@ the run on the first anomaly. Once stopped, no request reaches the inner
 transport again. The protocol it receives has already been checked by
 `evals.live.check_protocol`.
 """
+import asyncio
 from decimal import Decimal
 import json
 
 import httpx
 
 MAX_RESPONSE_BYTES = 65536
+# A cancellation is delivered once, so nothing else bounds a close awaited after the runtime deadline cancelled
+# the request; this does, and so bounds how far a case can run past that deadline.
+CLOSE_TIMEOUT_SECONDS = 1
 _MILLION = Decimal(10 ** 6)
 _USAGE_FIELDS = (("input_tokens", "input_usd_per_mtok", True), ("output_tokens", "output_usd_per_mtok", True),
                  ("cache_creation_input_tokens", "cache_write_usd_per_mtok", False),
@@ -88,7 +92,8 @@ class MeteredTransport(httpx.AsyncBaseTransport):
 
     async def _exchange(self, request):
         """Send, read and close one request. An exception from the inner transport, even from closing it during a
-        cancellation, is latched as transport_error before the next await, so nothing later can hide it."""
+        cancellation, is latched as transport_error before the next await, so nothing later can hide it. The close
+        has its own bound (CLOSE_TIMEOUT_SECONDS), so it cannot outlast a deadline cancellation unchecked."""
         inner, failed, data = self._connect(), False, bytearray()
         try:
             response = await inner.handle_async_request(request)
@@ -101,10 +106,13 @@ class MeteredTransport(httpx.AsyncBaseTransport):
             self._latch("transport_error", type(exc).__name__)
             failed = True
         finally:
+            bound = asyncio.timeout(CLOSE_TIMEOUT_SECONDS)
             try:
-                await inner.aclose()
+                async with bound:
+                    await inner.aclose()
             except Exception as exc:
-                self._latch("transport_error", f"closing the transport failed: {type(exc).__name__}")
+                self._latch("transport_error", f"closing the transport took longer than {CLOSE_TIMEOUT_SECONDS} s"
+                            if bound.expired() else f"closing the transport failed: {type(exc).__name__}")
                 failed = True
         if failed:
             self._halt("transport_error", "")

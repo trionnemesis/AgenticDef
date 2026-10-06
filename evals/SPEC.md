@@ -677,10 +677,14 @@ name.
   three rates can cost more. After sending: an exception from the inner
   transport while sending, reading or closing, even during a cancellation,
   stops the run (`transport_error`); it is latched before any further await,
-  so neither a later error nor a cancellation can hide the first failure, a
-  non-2xx status stops it (`http_status`), a body over 65536 bytes stops it
-  (`response_too_large`), missing or invalid `usage` stops it
-  (`usage_missing`), a `model` other than the protocol's stops it
+  so neither a later error nor a cancellation can hide the first failure.
+  Closing the inner transport has its own bound of 1 s, because a
+  cancellation is delivered only once and nothing else would bound a close
+  awaited after it; a close that overruns it also stops the run
+  (`transport_error`), so a close cannot hold a case past its deadline by
+  more than that bound. A non-2xx status stops the run (`http_status`), a body
+  over 65536 bytes stops it (`response_too_large`), missing or invalid `usage`
+  stops it (`usage_missing`), a `model` other than the protocol's stops it
   (`served_model_mismatch`), and actual input tokens above the bound, output
   tokens above `max_tokens` or an actual cost above the worst case stop it
   (`worst_case_exceeded`). Cost is input, output, cache-write and cache-read

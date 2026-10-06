@@ -12,6 +12,7 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import subprocess
+import time
 import types
 
 import httpx
@@ -21,7 +22,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from agenticdef.adapters.anthropic_model import ENDPOINT, AnthropicModel
 from agenticdef.domain.errors import ModelError
 
-from evals import live
+from evals import live, metering
 from evals.baselines import DeterministicOracle
 from evals.generate import generate
 from evals.live import check_protocol, load_protocol, run_live
@@ -459,6 +460,32 @@ def test_a_deadline_during_the_close_never_hides_an_earlier_transport_failure(pr
     transport = MeteredTransport(protocol, connect=lambda: SlowClose(_raise_connect_error))
     _deadline(transport)
     assert transport.stop == {"condition": "transport_error", "detail": "ConnectError"}
+    assert (transport.ledger()["calls"], transport.ledger()["worst_case_charged"]) == (1, 1)
+
+
+def test_the_close_after_a_deadline_cancellation_is_bounded(protocol, monkeypatch):
+    """[EV-LIVE-04] [EV-LIVE-05] A cancellation is delivered once, so a stalled close after it would hold the case
+    past its deadline: the close has its own bound, and overrunning it stops the run; the call is charged once."""
+    monkeypatch.setattr(metering, "CLOSE_TIMEOUT_SECONDS", 0.2)
+    transport = MeteredTransport(protocol, connect=lambda: SlowClose(_slow))
+    started = time.monotonic()
+    _deadline(transport)
+    assert time.monotonic() - started < 2
+    assert transport.stop == {"condition": "transport_error", "detail": "closing the transport took longer than 0.2 s"}
+    assert (transport.ledger()["calls"], transport.ledger()["worst_case_charged"]) == (1, 1)
+
+
+def test_a_stalled_close_after_a_billed_reply_stops_the_run(protocol, monkeypatch):
+    """[EV-LIVE-04] [EV-LIVE-05] The close bound holds without a cancellation too: overrunning it is a transport
+    error, the call is charged its worst case, and later requests never reach the API."""
+    monkeypatch.setattr(metering, "CLOSE_TIMEOUT_SECONDS", 0.1)
+    sent = []
+    transport = MeteredTransport(protocol, connect=lambda: SlowClose(lambda r: sent.append(r) or finish(r)))
+    for _ in range(2):
+        with pytest.raises(ModelError):
+            call(transport)
+    assert len(sent) == 1
+    assert transport.stop == {"condition": "transport_error", "detail": "closing the transport took longer than 0.1 s"}
     assert (transport.ledger()["calls"], transport.ledger()["worst_case_charged"]) == (1, 1)
 
 
