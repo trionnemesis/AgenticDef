@@ -78,13 +78,21 @@ def check_protocol(protocol):
     return _check(protocol)[0]
 
 
-def load_protocol(path):
+def _parse_protocol(data, source):
     try:
-        protocol = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise EvalError(f"protocol {path} is not a readable JSON file ({type(exc).__name__})") from exc
+        protocol = json.loads(data)
+    except ValueError as exc:
+        raise EvalError(f"protocol {source} is not a readable JSON file ({type(exc).__name__})") from exc
     check_protocol(protocol)
     return protocol
+
+
+def load_protocol(path):
+    try:
+        data = Path(path).read_bytes()
+    except OSError as exc:
+        raise EvalError(f"protocol {path} is not a readable JSON file ({type(exc).__name__})") from exc
+    return _parse_protocol(data, path)
 
 
 def run_live(protocol, *, output_dir, api_key, repo_sha, connect):
@@ -134,6 +142,30 @@ def git_status():
     return done.stdout
 
 
+def committed_bytes(path, root=REPO_ROOT):
+    """The protocol's bytes at HEAD. Raises unless the file (symlinks followed) is inside the repository and
+    identical to its committed version, so a run can only use a protocol that `repo_sha` reproduces."""
+    root, resolved = Path(root).resolve(), Path(path).resolve()
+    try:
+        relative = resolved.relative_to(root).as_posix()
+    except ValueError:
+        raise EvalError(f"protocol {path} is outside the repository; commit it first") from None
+    try:
+        committed = subprocess.run(["git", "show", f"HEAD:{relative}"], cwd=root, capture_output=True, check=True,
+                                   timeout=30).stdout
+    except subprocess.CalledProcessError:
+        raise EvalError(f"protocol {relative or path} is not committed at HEAD") from None
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise EvalError("cannot run git show") from exc
+    try:
+        on_disk = resolved.read_bytes()
+    except OSError as exc:
+        raise EvalError(f"protocol {path} is not a readable file ({type(exc).__name__})") from exc
+    if on_disk != committed:
+        raise EvalError(f"protocol {relative} differs from its committed version at HEAD")
+    return committed
+
+
 def _refuse(message):
     print(f"refused: {message}", file=sys.stderr)
     return 2
@@ -153,7 +185,7 @@ def main(argv=None, env=None):
     if not api_key:
         return _refuse("ANTHROPIC_API_KEY is not set")
     try:
-        protocol = load_protocol(args.protocol)
+        protocol = _parse_protocol(committed_bytes(args.protocol), args.protocol)
         cap = protocol["caps"]["max_cost_usd"]
         try:
             confirmed = Decimal(args.confirm_spend)

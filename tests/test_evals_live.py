@@ -11,6 +11,7 @@ from decimal import Decimal
 from hashlib import sha256
 import json
 from pathlib import Path
+import subprocess
 
 import httpx
 import pytest
@@ -238,6 +239,39 @@ def test_the_cost_cap_admits_a_call_whose_worst_case_fits(protocol):
     assert refused.stop["condition"] == "max_cost_usd"
 
 
+INPUT_SIDE = {"input_usd_per_mtok": "input_tokens", "cache_write_usd_per_mtok": "cache_creation_input_tokens",
+              "cache_read_usd_per_mtok": "cache_read_input_tokens"}
+
+
+@pytest.mark.parametrize("largest", sorted(INPUT_SIDE))
+def test_the_worst_case_prices_input_at_the_largest_input_side_rate(protocol, largest):
+    """[EV-LIVE-04] Whichever input-side price is largest, the preflight bound uses it: a cap just below that
+    worst case refuses the call, and a reply billing every input token at that rate stays within a cap just
+    above it."""
+    changed = deepcopy(protocol)
+    for key in INPUT_SIDE:
+        changed["prices"][key] = 50.0 if key == largest else 1.0
+    seen = []
+    probe = MeteredTransport(changed, connect=lambda: httpx.MockTransport(
+        lambda r: seen.append(len(r.content)) or finish(r, usage=_usage(input_tokens=0, output_tokens=0))))
+    call(probe)
+    bound = seen[0] + changed["input_overhead_tokens"]
+    max_tokens = changed["provider"]["max_tokens"]
+    worst = (bound * Decimal(50) + max_tokens * Decimal(str(changed["prices"]["output_usd_per_mtok"]))) / 10 ** 6
+    dearest = {**_usage(input_tokens=0, output_tokens=max_tokens), INPUT_SIDE[largest]: bound}
+    below = deepcopy(changed)
+    below["caps"]["max_cost_usd"] = float(worst) - 1e-9
+    refused = MeteredTransport(below, connect=lambda: httpx.MockTransport(lambda r: finish(r, usage=dearest)))
+    with pytest.raises(ModelError):
+        call(refused)
+    assert refused.stop["condition"] == "max_cost_usd" and refused.ledger()["calls"] == 0
+    above = deepcopy(changed)
+    above["caps"]["max_cost_usd"] = float(worst) + 1e-9
+    admitted = MeteredTransport(above, connect=lambda: httpx.MockTransport(lambda r: finish(r, usage=dearest)))
+    assert call(admitted) == {"type": "finish"} and admitted.stop is None
+    assert admitted.ledger()["cost_usd"] <= above["caps"]["max_cost_usd"]
+
+
 def test_the_call_cap_stops_the_run_and_later_calls_never_reach_the_api(protocol):
     """[EV-LIVE-04] [EV-LIVE-05] One call over max_model_calls is refused; every later request is refused too."""
     sent = []
@@ -437,7 +471,61 @@ def offline_git(monkeypatch):
     status = {"porcelain": ""}
     monkeypatch.setattr(live, "git_status", lambda: status["porcelain"])
     monkeypatch.setattr(live, "current_repo_sha", lambda: SHA)
+    monkeypatch.setattr(live, "committed_bytes", lambda path: Path(path).read_bytes())
     return status
+
+
+def _git(root, *args):
+    subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false",
+                    *args], cwd=root, check=True, capture_output=True)
+
+
+@pytest.fixture
+def repo(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git(root, "init", "-q")
+    (root / "protocol.json").write_text("{}", encoding="utf-8")
+    (root / ".gitignore").write_text("ignored.json\n", encoding="utf-8")
+    (root / "nested").mkdir()
+    (root / "nested" / "inner.json").write_text("{}", encoding="utf-8")
+    _git(root, "add", "protocol.json", ".gitignore", "nested/inner.json")
+    _git(root, "commit", "-q", "-m", "protocol")
+    (tmp_path / "outside.json").write_text("{}", encoding="utf-8")
+    return root
+
+
+def test_a_protocol_committed_at_head_yields_its_committed_bytes(repo):
+    """[EV-LIVE-03] A tracked, unchanged protocol inside the repository passes and its HEAD bytes are used."""
+    assert live.committed_bytes(repo / "protocol.json", root=repo) == b"{}"
+    assert live.committed_bytes(repo / "sub" / ".." / "protocol.json", root=repo) == b"{}"
+
+
+def _write(root, name, text="{}"):
+    (root / name).write_text(text, encoding="utf-8")
+    return root / name
+
+
+def _link(root):
+    (root / "link.json").symlink_to(root.parent / "outside.json")
+    return root / "link.json"
+
+
+@pytest.mark.parametrize("make, match", [
+    pytest.param(lambda root: _write(root, "untracked.json"), "not committed at HEAD", id="untracked"),
+    pytest.param(lambda root: _write(root, "ignored.json"), "not committed at HEAD", id="ignored"),
+    pytest.param(lambda root: _write(root, "protocol.json", '{"edited": true}'), "differs from its committed",
+                 id="edited"),
+    pytest.param(lambda root: root.parent / "outside.json", "outside the repository", id="outside"),
+    pytest.param(_link, "outside the repository", id="symlink-to-outside"),
+    pytest.param(lambda root: root, "not committed at HEAD", id="repository-root"),
+    pytest.param(lambda root: root / "nested", "not a readable file", id="tracked-directory"),
+])
+def test_only_a_protocol_committed_at_head_can_start_a_run(repo, make, match):
+    """[EV-LIVE-03] A clean tree is not enough: an untracked, ignored, edited, outside or symlinked-outside
+    protocol has no committed version at HEAD and is refused."""
+    with pytest.raises(EvalError, match=match):
+        live.committed_bytes(make(repo), root=repo)
 
 
 def _argv(tmp_path, spend="10", protocol_path=SMOKE):
@@ -461,6 +549,18 @@ def test_the_command_refuses_without_every_opt_in(tmp_path, monkeypatch, offline
     monkeypatch.setattr(live, "network_transport", lambda: pytest.fail("network transport constructed"))
     offline_git["porcelain"] = porcelain
     assert live.main(_argv(tmp_path, spend), env=env) == 2
+    assert not (tmp_path / "out").exists()
+
+
+def test_the_command_refuses_an_uncommitted_protocol(tmp_path, monkeypatch, offline_git):
+    """[EV-LIVE-03] A protocol without a committed version at HEAD exits 2 before any transport exists."""
+    monkeypatch.setattr(live, "network_transport", lambda: pytest.fail("network transport constructed"))
+
+    def uncommitted(path):
+        raise EvalError(f"protocol {path} is not committed at HEAD")
+
+    monkeypatch.setattr(live, "committed_bytes", uncommitted)
+    assert live.main(_argv(tmp_path), env=OPT_IN) == 2
     assert not (tmp_path / "out").exists()
 
 

@@ -651,11 +651,14 @@ name.
 - EV-LIVE-03: Opt-in. `python -m evals.live --protocol P --output-dir D
   --confirm-spend USD` runs only when the environment sets
   `AGENTICDEF_LIVE_EVAL=1` and a non-empty `ANTHROPIC_API_KEY`,
-  `--confirm-spend` equals `caps.max_cost_usd`, and `git status --porcelain`
-  is empty, so the protocol and code that ran are the recorded `repo_sha`.
-  Otherwise it exits non-zero before any network transport is constructed.
-  Tests and CI never set the opt-in; every test injects the inner transport,
-  so no test opens a connection.
+  `--confirm-spend` equals `caps.max_cost_usd`, `git status --porcelain` is
+  empty, and the `--protocol` file resolves (symlinks followed) to a path
+  inside the repository whose bytes equal its version at `HEAD` (`git show
+  HEAD:<path>`; an untracked, ignored or outside file has none). The run uses
+  those committed bytes, so the protocol and code that ran are the recorded
+  `repo_sha`. Otherwise it exits non-zero before any network transport is
+  constructed. Tests and CI never set the opt-in; every test injects the inner
+  transport, so no test opens a connection.
 - EV-LIVE-04: Metering. Every request passes through `MeteredTransport`, which
   never retries and opens a fresh inner transport per request through its
   injected `connect` callable (each case runs in its own event loop). Before
@@ -664,9 +667,10 @@ name.
   one more call would exceed `max_model_calls` (stop `max_model_calls`) or if
   the cost so far plus the call's worst case would exceed `max_cost_usd` (stop
   `max_cost_usd`). The worst case is `(body bytes + input_overhead_tokens)`
-  priced at the larger of the input and cache-write prices plus `max_tokens`
-  at the output price. After sending: an exception from the inner transport
-  stops the run (`transport_error`), a non-2xx status stops it
+  priced at the largest of the input, cache-write and cache-read prices plus
+  `max_tokens` at the output price, so no split of the input tokens across the
+  three rates can cost more. After sending: an exception from the inner
+  transport stops the run (`transport_error`), a non-2xx status stops it
   (`http_status`), a body over 65536 bytes stops it (`response_too_large`),
   missing or invalid `usage` stops it (`usage_missing`), a `model` other than
   the protocol's stops it (`served_model_mismatch`), and actual input tokens

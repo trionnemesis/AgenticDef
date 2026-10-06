@@ -75,7 +75,8 @@ class MeteredTransport(httpx.AsyncBaseTransport):
 
     def _worst_case(self, body_bytes):
         bound = body_bytes + self._overhead
-        input_price = max(self._price["input_usd_per_mtok"], self._price["cache_write_usd_per_mtok"])
+        input_price = max(self._price["input_usd_per_mtok"], self._price["cache_write_usd_per_mtok"],
+                          self._price["cache_read_usd_per_mtok"])
         return bound, (bound * input_price + self._provider["max_tokens"] * self._price["output_usd_per_mtok"]) / _MILLION
 
     def _charge_worst_case(self, worst):
