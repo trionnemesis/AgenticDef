@@ -3,12 +3,14 @@
 Every request of a live run passes through `MeteredTransport`. It never retries,
 checks each request against the protocol, refuses a call whose worst case could
 overrun the caps, charges actual usage in exact decimal arithmetic, and stops
-the run on the first anomaly. Once stopped, no request reaches the inner
+the run on the first anomaly: any exception after a call is sent stops the run,
+not just the anticipated ones. Once stopped, no request reaches the inner
 transport again. The protocol it receives has already been checked by
 `evals.live.check_protocol`.
 """
 import asyncio
 from decimal import Decimal
+from hashlib import sha256
 import json
 
 import httpx
@@ -20,6 +22,9 @@ CLOSE_TIMEOUT_SECONDS = 1
 # The largest integer a JSON number holds exactly; a usage count above it is invalid, which also keeps every
 # charged cost finite (prices are at most 1000 USD per million tokens).
 MAX_USAGE_COUNT = 2 ** 53 - 1
+# live-run.schema.json bounds stop.detail; a longer detail is shortened to fit, keeping its start, its length and
+# the SHA-256 of the full text.
+MAX_DETAIL_CHARS = 500
 _MILLION = Decimal(10 ** 6)
 _USAGE_FIELDS = (("input_tokens", "input_usd_per_mtok", True), ("output_tokens", "output_usd_per_mtok", True),
                  ("cache_creation_input_tokens", "cache_write_usd_per_mtok", False),
@@ -28,6 +33,23 @@ _USAGE_FIELDS = (("input_tokens", "input_usd_per_mtok", True), ("output_tokens",
 
 class LiveStopped(Exception):
     """A request refused or ended by a live-run stop condition."""
+
+
+def _describe(value):
+    """A JSON value for a stop detail: a scalar as its repr, an array or object by kind (its repr can recurse)."""
+    if isinstance(value, list):
+        return "a JSON array"
+    if isinstance(value, dict):
+        return "a JSON object"
+    return repr(value)
+
+
+def _bounded(detail):
+    if len(detail) <= MAX_DETAIL_CHARS:
+        return detail
+    digest = sha256(detail.encode("utf-8", "surrogatepass")).hexdigest()
+    suffix = f"... [{len(detail)} characters, sha256:{digest}]"
+    return detail[:MAX_DETAIL_CHARS - len(suffix)] + suffix
 
 
 def _count(usage, key, required):
@@ -61,7 +83,7 @@ class MeteredTransport(httpx.AsyncBaseTransport):
 
     def _latch(self, condition, detail):
         if self.stop is None:
-            self.stop = {"condition": condition, "detail": detail}
+            self.stop = {"condition": condition, "detail": _bounded(detail)}
 
     def _halt(self, condition, detail):
         self._latch(condition, detail)
@@ -70,7 +92,7 @@ class MeteredTransport(httpx.AsyncBaseTransport):
     def _check_request(self, request):
         try:
             body = json.loads(request.content)
-        except ValueError:
+        except Exception:  # any parse failure, including the parser's depth limit
             body = None
         if not isinstance(body, dict):
             self._halt("request_mismatch", "request body is not a JSON object")
@@ -81,7 +103,7 @@ class MeteredTransport(httpx.AsyncBaseTransport):
                   "anthropic-version": request.headers.get("anthropic-version")}
         for key in expected:
             if actual[key] != expected[key]:
-                self._halt("request_mismatch", f"{key} is {actual[key]!r}, protocol says {expected[key]!r}")
+                self._halt("request_mismatch", f"{key} is {_describe(actual[key])}, protocol says {expected[key]!r}")
 
     def _worst_case(self, body_bytes):
         bound = body_bytes + self._overhead
@@ -148,7 +170,7 @@ class MeteredTransport(httpx.AsyncBaseTransport):
                 message = json.loads(data)
                 usage = message["usage"]
                 counts = {key: _count(usage, key, required) for key, _, required in _USAGE_FIELDS}
-            except (ValueError, KeyError, TypeError, AttributeError):
+            except Exception:  # any parse or shape failure, including the parser's depth limit
                 self._halt("usage_missing", "usage is missing or invalid")
             cost = sum((counts[key] * self._price[price] for key, price, _ in _USAGE_FIELDS), Decimal(0)) / _MILLION
             self._cost += cost
@@ -156,7 +178,7 @@ class MeteredTransport(httpx.AsyncBaseTransport):
             for key, value in counts.items():
                 self._tokens[key] += value
             if message.get("model") != self._provider["model"]:
-                self._halt("served_model_mismatch", f"served by {message.get('model')!r}")
+                self._halt("served_model_mismatch", f"served by {_describe(message.get('model'))}")
             input_side = (counts["input_tokens"] + counts["cache_creation_input_tokens"]
                           + counts["cache_read_input_tokens"])
             if input_side > bound or counts["output_tokens"] > self._provider["max_tokens"] or cost > worst:
@@ -164,6 +186,11 @@ class MeteredTransport(httpx.AsyncBaseTransport):
                                                   f"{counts['output_tokens']} output tokens, cost {cost} (worst {worst})")
             return httpx.Response(response.status_code, headers={"content-type": "application/json"},
                                   content=bytes(data))
+        except LiveStopped:
+            raise
+        except Exception as exc:
+            # A sent call either returns a fully checked response or stops the run, whatever went wrong.
+            self._halt("response_unchecked", f"checking the response raised {type(exc).__name__}")
         finally:
             # Every sent call is charged exactly once: its actual usage above, otherwise its worst case here,
             # however the request ends (a stop, any exception, or a deadline cancellation).

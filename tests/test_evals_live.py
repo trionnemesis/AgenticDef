@@ -313,6 +313,10 @@ def _raise_connect_error(request):
     raise httpx.ConnectError("connection refused", request=request)
 
 
+# Under MAX_RESPONSE_BYTES, but deeper than json.loads can parse on Python 3.11 to 3.13.
+DEEP = b"[" * 32000 + b"]" * 32000
+
+
 def _usage(**changes):
     usage = {"input_tokens": 100, "output_tokens": 50, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
     usage.update(changes)
@@ -387,6 +391,86 @@ def test_the_largest_exact_usage_count_is_charged_as_reported(protocol, key):
     ledger = transport.ledger()
     assert transport.stop["condition"] == "worst_case_exceeded" and ledger["worst_case_charged"] == 0
     assert math.isfinite(ledger["cost_usd"]) and ledger["cost_usd"] > protocol["caps"]["max_cost_usd"]
+
+
+def test_a_response_too_deep_to_parse_stops_the_run(protocol):
+    """[EV-LIVE-04] [EV-LIVE-05] A body under the size limit can still exceed the parser's depth limit: that is
+    unreadable usage, so the call is charged its worst case and the run stops."""
+    sent = []
+    transport = metered(protocol, lambda r: sent.append(r) or httpx.Response(200, content=DEEP))
+    for _ in range(2):
+        with pytest.raises(ModelError):
+            call(transport)
+    assert len(sent) == 1
+    assert transport.stop == {"condition": "usage_missing", "detail": "usage is missing or invalid"}
+    assert transport.ledger()["worst_case_charged"] == 1
+
+
+def _served(model):
+    return lambda r: httpx.Response(200, json={**sonnet_reply({"type": "finish"}, r), "model": model})
+
+
+@pytest.mark.parametrize("length", [488, 489, 60000])
+def test_every_stop_detail_fits_the_live_run_schema(protocol, length):
+    """[EV-LIVE-04] A detail longer than 500 characters keeps its start and ends with its length and the SHA-256
+    of the full text, so an untrusted value can neither break the audit schema nor vanish from it."""
+    transport = metered(protocol, _served("m" * length))
+    with pytest.raises(ModelError):
+        call(transport)
+    full = "served by " + repr("m" * length)
+    detail = transport.stop["detail"]
+    assert transport.stop["condition"] == "served_model_mismatch" and len(detail) <= 500
+    if len(full) <= 500:
+        assert detail == full
+    else:
+        suffix = f"... [{len(full)} characters, sha256:{sha256(full.encode()).hexdigest()}]"
+        assert detail.endswith(suffix) and full.startswith(detail[:-len(suffix)]) and len(detail) == 500
+
+
+@pytest.mark.parametrize("model, described", [([[]] * 3, "a JSON array"), ({"id": MODEL}, "a JSON object"),
+                                              (None, "None"), (7, "7")])
+def test_a_served_model_that_is_not_a_string_is_described_not_rendered(protocol, model, described):
+    """[EV-LIVE-04] A JSON array or object in the reply is named by kind, never rendered into the detail."""
+    transport = metered(protocol, _served(model))
+    with pytest.raises(ModelError):
+        call(transport)
+    assert transport.stop == {"condition": "served_model_mismatch", "detail": f"served by {described}"}
+
+
+class _BrokenResponse:
+    """A response object whose status cannot be read, standing in for any unforeseen failure after sending."""
+
+    async def aiter_bytes(self):
+        yield b"{}"
+
+    async def aclose(self):
+        pass
+
+    @property
+    def status_code(self):
+        raise RuntimeError("malformed response")
+
+
+class _ReturnsBroken(httpx.AsyncBaseTransport):
+    def __init__(self, sent):
+        self.sent = sent
+
+    async def handle_async_request(self, request):
+        self.sent.append(request)
+        return _BrokenResponse()
+
+
+def test_an_unexpected_error_while_checking_a_response_stops_the_run(protocol):
+    """[EV-LIVE-04] [EV-LIVE-05] Any exception while checking a sent call stops the run, not just the anticipated
+    ones: the call is charged its worst case and no later request is sent."""
+    sent = []
+    transport = MeteredTransport(protocol, connect=lambda: _ReturnsBroken(sent))
+    for _ in range(2):
+        with pytest.raises(ModelError):
+            call(transport)
+    assert len(sent) == 1
+    assert transport.stop == {"condition": "response_unchecked", "detail": "checking the response raised RuntimeError"}
+    assert (transport.ledger()["calls"], transport.ledger()["worst_case_charged"]) == (1, 1)
 
 
 def test_a_call_cancelled_by_the_runtime_deadline_is_charged_its_worst_case(protocol):
@@ -536,7 +620,8 @@ def test_a_stalled_close_after_a_billed_reply_stops_the_run(protocol, monkeypatc
     assert (transport.ledger()["calls"], transport.ledger()["worst_case_charged"]) == (1, 1)
 
 
-@pytest.mark.parametrize("content", [b"not json", b"[1, 2]", b'"text"'])
+@pytest.mark.parametrize("content", [b"not json", b"[1, 2]", b'"text"', DEEP],
+                         ids=["not-json", "array", "string", "deep"])
 def test_a_request_body_that_is_not_a_json_object_is_never_sent(protocol, content):
     """[EV-LIVE-04] Anything but the adapter's JSON object request stops the run before it is sent."""
     sent = []
@@ -638,6 +723,14 @@ def test_an_absurd_usage_count_still_leaves_a_strict_json_live_run(protocol, tmp
     """[EV-LIVE-04] [EV-LIVE-06] The audit record of a run stopped by absurd usage is standard JSON."""
     result = _run(protocol, tmp_path, lambda r: finish(r, usage=_usage(input_tokens=10 ** 400)))
     assert result["stop"]["condition"] == "usage_missing"
+    assert _strict_json(tmp_path / "live" / "live-run.json") == result
+
+
+def test_a_long_served_model_still_leaves_a_schema_valid_live_run(protocol, tmp_path):
+    """[EV-LIVE-04] [EV-LIVE-06] A stop caused by an oversized untrusted value is still written as its audit
+    record."""
+    result = _run(protocol, tmp_path, _served("m" * 60000))
+    assert result["stop"]["condition"] == "served_model_mismatch" and list(LIVE_RUN.iter_errors(result)) == []
     assert _strict_json(tmp_path / "live" / "live-run.json") == result
 
 
