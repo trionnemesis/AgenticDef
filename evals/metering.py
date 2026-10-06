@@ -52,10 +52,13 @@ class MeteredTransport(httpx.AsyncBaseTransport):
                 "cache_read_tokens": self._tokens["cache_read_input_tokens"], "cost_usd": float(self._cost),
                 "worst_case_charged": self._worst_case_charged, "http_statuses": dict(sorted(self._statuses.items()))}
 
-    def _halt(self, condition, detail):
+    def _latch(self, condition, detail):
         if self.stop is None:
             self.stop = {"condition": condition, "detail": detail}
-        raise LiveStopped(f"live run stopped: {condition}: {detail}")
+
+    def _halt(self, condition, detail):
+        self._latch(condition, detail)
+        raise LiveStopped(f"live run stopped: {self.stop['condition']}: {self.stop['detail']}")
 
     def _check_request(self, request):
         try:
@@ -83,6 +86,30 @@ class MeteredTransport(httpx.AsyncBaseTransport):
         self._cost += worst
         self._worst_case_charged += 1
 
+    async def _exchange(self, request):
+        """Send, read and close one request. An exception from the inner transport, even from closing it during a
+        cancellation, is latched as transport_error before the next await, so nothing later can hide it."""
+        inner, failed, data = self._connect(), False, bytearray()
+        try:
+            response = await inner.handle_async_request(request)
+            async for chunk in response.aiter_bytes():
+                data.extend(chunk)
+                if len(data) > MAX_RESPONSE_BYTES:
+                    break
+            await response.aclose()
+        except Exception as exc:
+            self._latch("transport_error", type(exc).__name__)
+            failed = True
+        finally:
+            try:
+                await inner.aclose()
+            except Exception as exc:
+                self._latch("transport_error", f"closing the transport failed: {type(exc).__name__}")
+                failed = True
+        if failed:
+            self._halt("transport_error", "")
+        return response, data
+
     async def handle_async_request(self, request):
         if self.stop is not None:
             raise LiveStopped(f"live run already stopped: {self.stop['condition']}")
@@ -93,65 +120,40 @@ class MeteredTransport(httpx.AsyncBaseTransport):
         if self._cost + worst > Decimal(str(self._caps["max_cost_usd"])):
             self._halt("max_cost_usd", f"spent {self._cost} + worst case {worst} exceeds {self._caps['max_cost_usd']}")
         self._calls += 1
-        inner = self._connect()
+        accounted = False
         try:
-            response = await inner.handle_async_request(request)
-            data = bytearray()
-            async for chunk in response.aiter_bytes():
-                data.extend(chunk)
-                if len(data) > MAX_RESPONSE_BYTES:
-                    break
-            await response.aclose()
-        except Exception as exc:
-            self._charge_worst_case(worst)
-            await self._close_after_failure(inner)
-            self._halt("transport_error", type(exc).__name__)
-        except BaseException:
-            # The runtime deadline cancelled a request that was already sent and may be billed. That is a run
-            # outcome (BudgetError), not an anomaly: charge the worst case and let the cancellation through.
-            self._charge_worst_case(worst)
-            await self._close_after_failure(inner)
-            raise
-        try:
-            await inner.aclose()
-        except Exception as exc:
-            self._charge_worst_case(worst)
-            self._halt("transport_error", f"closing the transport failed: {type(exc).__name__}")
-        status = str(response.status_code)
-        self._statuses[status] = self._statuses.get(status, 0) + 1
-        if not 200 <= response.status_code < 300:
-            self._charge_worst_case(worst)
-            self._halt("http_status", status)
-        if len(data) > MAX_RESPONSE_BYTES:
-            self._charge_worst_case(worst)
-            self._halt("response_too_large", f"more than {MAX_RESPONSE_BYTES} bytes")
-        try:
-            message = json.loads(data)
-            usage = message["usage"]
-            counts = {key: _count(usage, key, required) for key, _, required in _USAGE_FIELDS}
-        except (ValueError, KeyError, TypeError, AttributeError):
-            self._charge_worst_case(worst)
-            self._halt("usage_missing", "usage is missing or invalid")
-        cost = sum((counts[key] * self._price[price] for key, price, _ in _USAGE_FIELDS), Decimal(0)) / _MILLION
-        self._cost += cost
-        for key, value in counts.items():
-            self._tokens[key] += value
-        if message.get("model") != self._provider["model"]:
-            self._halt("served_model_mismatch", f"served by {message.get('model')!r}")
-        input_side = counts["input_tokens"] + counts["cache_creation_input_tokens"] + counts["cache_read_input_tokens"]
-        if input_side > bound or counts["output_tokens"] > self._provider["max_tokens"] or cost > worst:
-            self._halt("worst_case_exceeded", f"{input_side} input tokens (bound {bound}), {counts['output_tokens']} "
-                                              f"output tokens, cost {cost} (worst {worst})")
-        return httpx.Response(response.status_code, headers={"content-type": "application/json"},
-                              content=bytes(data))
-
-    @staticmethod
-    async def _close_after_failure(inner):
-        """Close on a path that already failed loudly and was charged; a second error must not mask the first."""
-        try:
-            await inner.aclose()
-        except Exception:
-            pass
+            response, data = await self._exchange(request)
+            status = str(response.status_code)
+            self._statuses[status] = self._statuses.get(status, 0) + 1
+            if not 200 <= response.status_code < 300:
+                self._halt("http_status", status)
+            if len(data) > MAX_RESPONSE_BYTES:
+                self._halt("response_too_large", f"more than {MAX_RESPONSE_BYTES} bytes")
+            try:
+                message = json.loads(data)
+                usage = message["usage"]
+                counts = {key: _count(usage, key, required) for key, _, required in _USAGE_FIELDS}
+            except (ValueError, KeyError, TypeError, AttributeError):
+                self._halt("usage_missing", "usage is missing or invalid")
+            cost = sum((counts[key] * self._price[price] for key, price, _ in _USAGE_FIELDS), Decimal(0)) / _MILLION
+            self._cost += cost
+            accounted = True
+            for key, value in counts.items():
+                self._tokens[key] += value
+            if message.get("model") != self._provider["model"]:
+                self._halt("served_model_mismatch", f"served by {message.get('model')!r}")
+            input_side = (counts["input_tokens"] + counts["cache_creation_input_tokens"]
+                          + counts["cache_read_input_tokens"])
+            if input_side > bound or counts["output_tokens"] > self._provider["max_tokens"] or cost > worst:
+                self._halt("worst_case_exceeded", f"{input_side} input tokens (bound {bound}), "
+                                                  f"{counts['output_tokens']} output tokens, cost {cost} (worst {worst})")
+            return httpx.Response(response.status_code, headers={"content-type": "application/json"},
+                                  content=bytes(data))
+        finally:
+            # Every sent call is charged exactly once: its actual usage above, otherwise its worst case here,
+            # however the request ends (a stop, any exception, or a deadline cancellation).
+            if not accounted:
+                self._charge_worst_case(worst)
 
     async def aclose(self):
         """Each request opens and closes its own inner transport; there is nothing shared to close."""

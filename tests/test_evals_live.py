@@ -410,18 +410,55 @@ def test_a_failed_close_never_masks_the_first_failure(protocol):
     assert (transport.ledger()["calls"], transport.ledger()["worst_case_charged"]) == (1, 1)
 
 
-def test_a_cancelled_call_whose_close_fails_is_charged_once_and_still_cancelled(protocol):
-    """[EV-LIVE-04] A deadline cancellation stays a cancellation even if closing fails; it is charged once and
-    does not stop the run."""
-    async def slow(request):
-        await asyncio.sleep(5)
-        return finish(request)
+class SlowClose(httpx.AsyncBaseTransport):
+    """A transport that answers through a mock handler but takes long to close."""
 
-    transport = MeteredTransport(protocol, connect=lambda: ClosingFails(slow))
+    def __init__(self, handler):
+        self.inner = httpx.MockTransport(handler)
+
+    async def handle_async_request(self, request):
+        return await self.inner.handle_async_request(request)
+
+    async def aclose(self):
+        await asyncio.sleep(5)
+
+
+def _deadline(transport, timeout=0.05):
     adapter = AnthropicModel(model=MODEL, api_key="test-placeholder", transport=transport)
     with pytest.raises(asyncio.TimeoutError):
-        asyncio.run(asyncio.wait_for(adapter.choose_action({"evidence": []}, ("get_change_event",)), timeout=0.05))
+        asyncio.run(asyncio.wait_for(adapter.choose_action({"evidence": []}, ("get_change_event",)), timeout=timeout))
+
+
+async def _slow(request):
+    await asyncio.sleep(5)
+    return finish(request)
+
+
+def test_a_cancelled_call_whose_close_fails_is_charged_once_stays_cancelled_and_stops(protocol):
+    """[EV-LIVE-04] [EV-LIVE-05] A close failure is a transport error even during a deadline cancellation: the
+    cancellation still propagates, the call is charged once, and the run stops."""
+    transport = MeteredTransport(protocol, connect=lambda: ClosingFails(_slow))
+    _deadline(transport)
+    assert transport.stop == {"condition": "transport_error", "detail": "closing the transport failed: RuntimeError"}
+    assert (transport.ledger()["calls"], transport.ledger()["worst_case_charged"]) == (1, 1)
+
+
+def test_a_deadline_during_the_close_of_a_billed_reply_is_charged(protocol):
+    """[EV-LIVE-04] A cancellation that arrives while closing after a billed reply still charges the call's worst
+    case; a deadline is a run outcome, so the run is not stopped."""
+    transport = MeteredTransport(protocol, connect=lambda: SlowClose(finish))
+    _deadline(transport)
     assert transport.stop is None
+    assert (transport.ledger()["calls"], transport.ledger()["worst_case_charged"]) == (1, 1)
+    assert transport.ledger()["cost_usd"] > 0
+
+
+def test_a_deadline_during_the_close_never_hides_an_earlier_transport_failure(protocol):
+    """[EV-LIVE-04] [EV-LIVE-05] The first failure is latched before the close is awaited, so a cancellation
+    during that close cannot hide it; the call is charged once."""
+    transport = MeteredTransport(protocol, connect=lambda: SlowClose(_raise_connect_error))
+    _deadline(transport)
+    assert transport.stop == {"condition": "transport_error", "detail": "ConnectError"}
     assert (transport.ledger()["calls"], transport.ledger()["worst_case_charged"]) == (1, 1)
 
 
