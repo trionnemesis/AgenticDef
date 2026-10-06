@@ -10,6 +10,7 @@ from copy import deepcopy
 from decimal import Decimal
 from hashlib import sha256
 import json
+import math
 from pathlib import Path
 import subprocess
 import time
@@ -359,6 +360,35 @@ def test_post_response_stop_conditions(protocol, handler, condition, statuses, c
     assert ledger["cost_usd"] > 0
 
 
+USAGE_KEYS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+
+
+@pytest.mark.parametrize("key", USAGE_KEYS)
+@pytest.mark.parametrize("value", [pytest.param(2 ** 53, id="2**53"), pytest.param(10 ** 400, id="10**400")])
+def test_a_usage_count_beyond_exact_json_integers_is_invalid(protocol, key, value):
+    """[EV-LIVE-04] A count above 2**53 - 1 cannot be recorded exactly, and its cost can overflow a JSON number:
+    it is invalid usage, so the call is charged its worst case and the ledger stays finite."""
+    transport = metered(protocol, lambda r: finish(r, usage=_usage(**{key: value})))
+    with pytest.raises(ModelError):
+        call(transport)
+    ledger = transport.ledger()
+    assert transport.stop == {"condition": "usage_missing", "detail": "usage is missing or invalid"}
+    assert ledger["worst_case_charged"] == 1 and 0 < ledger["cost_usd"] < protocol["caps"]["max_cost_usd"]
+    assert ledger[{"cache_creation_input_tokens": "cache_write_tokens",
+                   "cache_read_input_tokens": "cache_read_tokens"}.get(key, key)] == 0
+
+
+@pytest.mark.parametrize("key", USAGE_KEYS)
+def test_the_largest_exact_usage_count_is_charged_as_reported(protocol, key):
+    """[EV-LIVE-04] 2**53 - 1 is still a valid count: it is charged as reported, finitely, and breaches the bound."""
+    transport = metered(protocol, lambda r: finish(r, usage=_usage(**{key: 2 ** 53 - 1})))
+    with pytest.raises(ModelError):
+        call(transport)
+    ledger = transport.ledger()
+    assert transport.stop["condition"] == "worst_case_exceeded" and ledger["worst_case_charged"] == 0
+    assert math.isfinite(ledger["cost_usd"]) and ledger["cost_usd"] > protocol["caps"]["max_cost_usd"]
+
+
 def test_a_call_cancelled_by_the_runtime_deadline_is_charged_its_worst_case(protocol):
     """[EV-LIVE-04] A sent request cancelled mid-flight may still be billed: it is charged its worst case, and the
     run is not stopped, because a deadline is a run outcome rather than an anomaly."""
@@ -408,6 +438,23 @@ def test_a_failed_close_never_masks_the_first_failure(protocol):
     with pytest.raises(ModelError):
         call(transport)
     assert transport.stop == {"condition": "transport_error", "detail": "ConnectError"}
+    assert (transport.ledger()["calls"], transport.ledger()["worst_case_charged"]) == (1, 1)
+
+
+def _cannot_open():
+    raise RuntimeError("cannot build the TLS context")
+
+
+def test_a_failure_while_opening_the_transport_stops_the_run(protocol):
+    """[EV-LIVE-04] [EV-LIVE-05] Opening the inner transport is part of the exchange: if it raises, the call is
+    charged its worst case, the run stops, and no later request opens another."""
+    opened = []
+    transport = MeteredTransport(protocol, connect=lambda: opened.append(1) or _cannot_open())
+    for _ in range(2):
+        with pytest.raises(ModelError):
+            call(transport)
+    assert len(opened) == 1
+    assert transport.stop == {"condition": "transport_error", "detail": "opening the transport failed: RuntimeError"}
     assert (transport.ledger()["calls"], transport.ledger()["worst_case_charged"]) == (1, 1)
 
 
@@ -570,6 +617,37 @@ def test_a_stop_on_the_last_call_still_withholds_metrics(protocol, completed, tm
     result = _run(protocol, tmp_path, api)
     assert (result["status"], result["metrics"], result["stop"]["condition"]) == ("stopped", None, "http_status")
     assert len(api.calls) == total and envelope(api.calls[-1])["task"] == "produce_result"
+
+
+def _strict_json(path):
+    def refuse(token):
+        raise ValueError(f"non-standard JSON token {token}")
+    return json.loads(path.read_text(encoding="utf-8"), parse_constant=refuse)
+
+
+def test_a_transport_that_cannot_be_opened_stops_the_run(protocol, tmp_path):
+    """[EV-LIVE-05] A run whose transport fails to open is stopped at the first call, never completed with
+    metrics."""
+    result = run_live(protocol, output_dir=tmp_path / "live", api_key="test-placeholder", repo_sha=SHA,
+                      connect=_cannot_open)
+    assert (result["status"], result["metrics"], result["stop"]["condition"]) == ("stopped", None, "transport_error")
+    assert (result["ledger"]["calls"], result["ledger"]["worst_case_charged"]) == (1, 1)
+
+
+def test_an_absurd_usage_count_still_leaves_a_strict_json_live_run(protocol, tmp_path):
+    """[EV-LIVE-04] [EV-LIVE-06] The audit record of a run stopped by absurd usage is standard JSON."""
+    result = _run(protocol, tmp_path, lambda r: finish(r, usage=_usage(input_tokens=10 ** 400)))
+    assert result["stop"]["condition"] == "usage_missing"
+    assert _strict_json(tmp_path / "live" / "live-run.json") == result
+
+
+def test_a_live_run_with_a_non_finite_number_is_never_written(protocol, tmp_path, monkeypatch):
+    """[EV-LIVE-06] Whatever the ledger holds, live-run.json is never written with NaN or Infinity."""
+    real = MeteredTransport.ledger
+    monkeypatch.setattr(MeteredTransport, "ledger", lambda self: {**real(self), "cost_usd": float("inf")})
+    with pytest.raises(EvalError, match="cost_usd is not a finite number"):
+        _run(protocol, tmp_path, lambda r: finish(r))
+    assert not (tmp_path / "live" / "live-run.json").exists()
 
 
 def test_run_live_refuses_an_existing_output_dir_or_an_untrue_protocol(protocol, tmp_path):

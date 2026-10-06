@@ -17,6 +17,9 @@ MAX_RESPONSE_BYTES = 65536
 # A cancellation is delivered once, so nothing else bounds a close awaited after the runtime deadline cancelled
 # the request; this does, and so bounds how far a case can run past that deadline.
 CLOSE_TIMEOUT_SECONDS = 1
+# The largest integer a JSON number holds exactly; a usage count above it is invalid, which also keeps every
+# charged cost finite (prices are at most 1000 USD per million tokens).
+MAX_USAGE_COUNT = 2 ** 53 - 1
 _MILLION = Decimal(10 ** 6)
 _USAGE_FIELDS = (("input_tokens", "input_usd_per_mtok", True), ("output_tokens", "output_usd_per_mtok", True),
                  ("cache_creation_input_tokens", "cache_write_usd_per_mtok", False),
@@ -31,7 +34,7 @@ def _count(usage, key, required):
     value = usage.get(key)
     if value is None and not required:
         return 0
-    if type(value) is not int or value < 0:
+    if type(value) is not int or not 0 <= value <= MAX_USAGE_COUNT:
         raise ValueError(key)
     return value
 
@@ -91,11 +94,13 @@ class MeteredTransport(httpx.AsyncBaseTransport):
         self._worst_case_charged += 1
 
     async def _exchange(self, request):
-        """Send, read and close one request. An exception from the inner transport, even from closing it during a
-        cancellation, is latched as transport_error before the next await, so nothing later can hide it. The close
-        has its own bound (CLOSE_TIMEOUT_SECONDS), so it cannot outlast a deadline cancellation unchecked."""
-        inner, failed, data = self._connect(), False, bytearray()
+        """Open, send, read and close one request. An exception from the inner transport, from opening it to closing
+        it even during a cancellation, is latched as transport_error before the next await, so nothing later can
+        hide it. The close has its own bound (CLOSE_TIMEOUT_SECONDS), so it cannot outlast a deadline cancellation
+        unchecked."""
+        inner, failed, data = None, False, bytearray()
         try:
+            inner = self._connect()
             response = await inner.handle_async_request(request)
             async for chunk in response.aiter_bytes():
                 data.extend(chunk)
@@ -103,17 +108,19 @@ class MeteredTransport(httpx.AsyncBaseTransport):
                     break
             await response.aclose()
         except Exception as exc:
-            self._latch("transport_error", type(exc).__name__)
+            self._latch("transport_error", type(exc).__name__ if inner is not None
+                        else f"opening the transport failed: {type(exc).__name__}")
             failed = True
         finally:
-            bound = asyncio.timeout(CLOSE_TIMEOUT_SECONDS)
-            try:
-                async with bound:
-                    await inner.aclose()
-            except Exception as exc:
-                self._latch("transport_error", f"closing the transport took longer than {CLOSE_TIMEOUT_SECONDS} s"
-                            if bound.expired() else f"closing the transport failed: {type(exc).__name__}")
-                failed = True
+            if inner is not None:
+                bound = asyncio.timeout(CLOSE_TIMEOUT_SECONDS)
+                try:
+                    async with bound:
+                        await inner.aclose()
+                except Exception as exc:
+                    self._latch("transport_error", f"closing the transport took longer than {CLOSE_TIMEOUT_SECONDS} s"
+                                if bound.expired() else f"closing the transport failed: {type(exc).__name__}")
+                    failed = True
         if failed:
             self._halt("transport_error", "")
         return response, data

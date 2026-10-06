@@ -138,6 +138,7 @@ def run_live(protocol, *, output_dir, api_key, repo_sha, connect):
     result = {"live_run_version": LIVE_RUN_VERSION, "protocol_id": protocol["protocol_id"], "protocol_digest": digest,
               "protocol": protocol, "repo_sha": repo_sha, "status": "stopped" if stopped else "completed",
               "stop": transport.stop, "ledger": transport.ledger(), "metrics": None if stopped else metrics}
+    _require_finite(result, "live run")
     _require_valid(_LIVE_RUN_VALIDATOR, result, "live run")
     (output_dir / "live-run.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return result

@@ -675,25 +675,28 @@ name.
   priced at the largest of the input, cache-write and cache-read prices plus
   `max_tokens` at the output price, so no split of the input tokens across the
   three rates can cost more. After sending: an exception from the inner
-  transport while sending, reading or closing, even during a cancellation,
-  stops the run (`transport_error`); it is latched before any further await,
-  so neither a later error nor a cancellation can hide the first failure.
-  Closing the inner transport has its own bound of 1 s, because a
-  cancellation is delivered only once and nothing else would bound a close
+  transport while opening, sending, reading or closing it, even during a
+  cancellation, stops the run (`transport_error`); it is latched before any
+  further await, so neither a later error nor a cancellation can hide the
+  first failure. Closing the inner transport has its own bound of 1 s, because
+  a cancellation is delivered only once and nothing else would bound a close
   awaited after it; a close that overruns it also stops the run
-  (`transport_error`), so a close cannot hold a case past its deadline by
-  more than that bound. A non-2xx status stops the run (`http_status`), a body
-  over 65536 bytes stops it (`response_too_large`), missing or invalid `usage`
-  stops it (`usage_missing`), a `model` other than the protocol's stops it
-  (`served_model_mismatch`), and actual input tokens above the bound, output
-  tokens above `max_tokens` or an actual cost above the worst case stop it
-  (`worst_case_exceeded`). Cost is input, output, cache-write and cache-read
-  tokens times their prices, divided by one million, in exact decimal
-  arithmetic. Every sent call is charged exactly once, whatever way the
-  request ends: its actual usage once that is read, otherwise its worst case
-  (counted in `worst_case_charged`), including a call the runtime deadline
-  cancels at any point, which ends the case in `BudgetError` but does not by
-  itself stop the run. So the ledger never under-reports spend.
+  (`transport_error`), so a close cannot hold a case past its deadline by more
+  than that bound. A non-2xx status stops the run (`http_status`), a body over
+  65536 bytes stops it (`response_too_large`), missing or invalid `usage`
+  stops it (`usage_missing`; a count must be an integer from 0 to 2^53 - 1,
+  the largest a JSON number holds exactly, which with prices of at most 1000
+  USD per million tokens also keeps every charged cost finite), a `model`
+  other than the protocol's stops it (`served_model_mismatch`), and actual
+  input tokens above the bound, output tokens above `max_tokens` or an actual
+  cost above the worst case stop it (`worst_case_exceeded`). Cost is input,
+  output, cache-write and cache-read tokens times their prices, divided by one
+  million, in exact decimal arithmetic. Every sent call is charged exactly
+  once, whatever way the request ends: its actual usage once that is read,
+  otherwise its worst case (counted in `worst_case_charged`), including a call
+  the runtime deadline cancels at any point, which ends the case in
+  `BudgetError` but does not by itself stop the run. So the ledger never
+  under-reports spend.
 - EV-LIVE-05: Stop. Once stopped, every later request raises before it
   reaches the inner transport (so the adapter fails that call closed), and
   the driver aborts before the next case. A stopped run has `status:
@@ -711,8 +714,10 @@ name.
   status: "completed" | "stopped", stop: null | {condition, detail}, ledger:
   {calls, input_tokens, output_tokens, cache_write_tokens, cache_read_tokens,
   cost_usd, worst_case_charged, http_statuses}, metrics}`, where `metrics` is
-  the section 10 report of a completed run. The command prints `status`,
-  `stop` and `ledger` and exits 0 only for a completed run.
+  the section 10 report of a completed run. A result holding a non-finite
+  number is refused rather than written, so `live-run.json` is always standard
+  JSON. The command prints `status`, `stop` and `ledger` and exits 0 only for
+  a completed run.
 - EV-LIVE-07: The smoke protocol `evals/protocols/d8-smoke-sonnet-5-5.json`
   records decision D8: model `claude-sonnet-5-5`, split `dev`, k=1,
   `max_cost_usd` 10, and three families picked by a fixed rule (for each
