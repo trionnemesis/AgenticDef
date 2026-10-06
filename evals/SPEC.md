@@ -657,16 +657,21 @@ name.
   whitespace (the HTTP client builds its header before the metered transport
   sees a request, so a key it cannot encode would fail every case unseen by
   the meter; the refusal never repeats the key), `--confirm-spend` equals
-  `caps.max_cost_usd`, `git status --porcelain` is empty, and the `--protocol`
-  file resolves (symlinks followed) to a path inside the repository whose
-  bytes equal its version at `HEAD` (`git show HEAD:<path>`; an untracked,
-  ignored or outside file has none), and every loaded `agenticdef` and `evals`
-  module comes from this checkout's `src/agenticdef/` and `evals/` (not an
-  installed wheel or another path). The run uses those committed bytes, so the
-  protocol and code that ran are the recorded `repo_sha`. Otherwise it exits
-  non-zero before any network transport is constructed. Tests and CI never set
-  the opt-in; every test injects the inner transport, so no test opens a
-  connection.
+  `caps.max_cost_usd`, `git status --porcelain` is empty, and every check is
+  pinned to one revision: `HEAD` is read once, the `--protocol` file resolves
+  (symlinks followed) to a path inside the repository whose bytes equal its
+  version at that revision (`git show <rev>:<path>`; an untracked, ignored or
+  outside file has none), every loaded `agenticdef` and `evals` module
+  (including `evals.live` itself when run as `__main__`) comes from this
+  checkout's `src/agenticdef/` and `evals/` (not an installed wheel or another
+  path) and its file equals its blob at that revision and was not written
+  after `evals.live` began importing the runtime (so code loaded before a
+  later commit or checkout cannot pass as the new revision), and `HEAD` is
+  still that revision when the checks end. The run uses those committed bytes
+  and records that revision as `repo_sha`, so the protocol and code that ran
+  are the recorded `repo_sha`. Otherwise it exits non-zero before any network
+  transport is constructed. Tests and CI never set the opt-in; every test
+  injects the inner transport, so no test opens a connection.
 - EV-LIVE-04: Metering. Every request passes through `MeteredTransport`, which
   never retries and opens a fresh inner transport per request through its
   injected `connect` callable (each case runs in its own event loop). Before
@@ -749,6 +754,8 @@ adapter. `max_tokens` (4096) includes thinking tokens, so a long reasoning
 turn ends `max_tokens` and fails closed. The runtime deadline
 (`policy.max_runtime_seconds`, 10 s in the generated cases) counts real
 latency under `clock="system"`, so slow responses end in `BudgetError`. The
-input bound assumes a token is at least one byte of the request body; a
-breach stops the run rather than being absorbed. Retention of the synthetic
-cases sent to the API follows the operator's account settings.
+input bound assumes a token is at least one byte of the request body; a breach
+stops the run rather than being absorbed. The provenance checks end before the
+transport is built: the operator must not change the checkout while a run is
+in flight. Retention of the synthetic cases sent to the API follows the
+operator's account settings.

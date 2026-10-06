@@ -11,6 +11,7 @@ from decimal import Decimal
 from hashlib import sha256
 import json
 import math
+import os
 from pathlib import Path
 import subprocess
 import time
@@ -855,8 +856,8 @@ def offline_git(monkeypatch):
     status = {"porcelain": ""}
     monkeypatch.setattr(live, "git_status", lambda: status["porcelain"])
     monkeypatch.setattr(live, "current_repo_sha", lambda: SHA)
-    monkeypatch.setattr(live, "committed_bytes", lambda path: Path(path).read_bytes())
-    monkeypatch.setattr(live, "check_runtime_sources", lambda: None)
+    monkeypatch.setattr(live, "committed_bytes", lambda path, rev="HEAD": Path(path).read_bytes())
+    monkeypatch.setattr(live, "check_runtime_sources", lambda rev=None: None)
     return status
 
 
@@ -893,11 +894,19 @@ def test_a_runtime_module_loaded_from_elsewhere_refuses_the_run(name, file):
         live.check_runtime_sources(modules=modules)
 
 
+def test_the_module_run_as_main_is_judged_by_its_real_name():
+    """[EV-LIVE-03] `python -m evals.live` runs evals.live as __main__; it is checked like every evals module."""
+    main = _module("__main__", "/elsewhere/evals/live.py")
+    main.__spec__ = types.SimpleNamespace(name="evals.live")
+    with pytest.raises(EvalError, match="module evals.live is loaded from"):
+        live.check_runtime_sources(modules={**_checkout_modules(), "__main__": main})
+
+
 def test_the_command_refuses_runtime_code_from_elsewhere(tmp_path, monkeypatch, offline_git):
     """[EV-LIVE-03] The command exits 2 before any transport exists when the runtime is not this checkout."""
     monkeypatch.setattr(live, "network_transport", lambda: pytest.fail("network transport constructed"))
 
-    def elsewhere():
+    def elsewhere(rev=None):
         raise EvalError("module agenticdef is loaded from /site-packages, not from this checkout")
 
     monkeypatch.setattr(live, "check_runtime_sources", elsewhere)
@@ -958,6 +967,78 @@ def test_only_a_protocol_committed_at_head_can_start_a_run(repo, make, match):
         live.committed_bytes(make(repo), root=repo)
 
 
+def _head(root, ref="HEAD"):
+    return subprocess.run(["git", "rev-parse", ref], cwd=root, capture_output=True, text=True,
+                          check=True).stdout.strip()
+
+
+def test_the_protocol_is_read_at_the_pinned_revision_not_at_whatever_head_is_now(repo):
+    """[EV-LIVE-03] A commit after the revision was pinned cannot change which protocol the record names."""
+    pinned = _head(repo)
+    _write(repo, "protocol.json", '{"v": 2}')
+    _git(repo, "commit", "-q", "-am", "v2")
+    with pytest.raises(EvalError, match=f"protocol protocol.json differs from its committed version at {pinned}"):
+        live.committed_bytes(repo / "protocol.json", root=repo, rev=pinned)
+    assert live.committed_bytes(repo / "protocol.json", root=repo, rev=_head(repo)) == b'{"v": 2}'
+
+
+@pytest.fixture
+def runtime_repo(repo):
+    for relative in ("src/agenticdef/core.py", "evals/driver.py"):
+        (repo / relative).parent.mkdir(parents=True, exist_ok=True)
+        (repo / relative).write_text("VALUE = 1\n", encoding="utf-8")
+    _git(repo, "add", "src", "evals")
+    _git(repo, "commit", "-q", "-m", "runtime")
+    return repo
+
+
+def _loaded(root):
+    return {"agenticdef.core": _module("agenticdef.core", root / "src" / "agenticdef" / "core.py"),
+            "evals.driver": _module("evals.driver", root / "evals" / "driver.py")}
+
+
+def test_runtime_sources_equal_to_the_pinned_revision_pass(runtime_repo):
+    """[EV-LIVE-03] Loaded modules whose files equal their blobs at the pinned revision, unchanged since import."""
+    live.check_runtime_sources(root=runtime_repo, modules=_loaded(runtime_repo), rev=_head(runtime_repo),
+                               loaded_after_ns=time.time_ns())
+
+
+def test_a_runtime_source_that_differs_from_the_pinned_revision_refuses_the_run(runtime_repo):
+    """[EV-LIVE-03] A path inside the checkout is not enough: the file must equal its blob at the pinned revision."""
+    (runtime_repo / "evals" / "driver.py").write_text("VALUE = 2\n", encoding="utf-8")
+    pinned = _head(runtime_repo)
+    with pytest.raises(EvalError, match=f"module evals.driver evals/driver.py differs from its committed version at "
+                                        f"{pinned}"):
+        live.check_runtime_sources(root=runtime_repo, modules=_loaded(runtime_repo), rev=pinned,
+                                   loaded_after_ns=time.time_ns())
+
+
+def test_a_runtime_source_absent_from_the_pinned_revision_refuses_the_run(runtime_repo):
+    """[EV-LIVE-03] Code the pinned revision does not hold cannot be attributed to it."""
+    earlier = _head(runtime_repo, "HEAD~1")
+    with pytest.raises(EvalError, match=f"is not committed at {earlier}"):
+        live.check_runtime_sources(root=runtime_repo, modules=_loaded(runtime_repo), rev=earlier,
+                                   loaded_after_ns=time.time_ns())
+
+
+def test_a_runtime_source_written_after_the_imports_refuses_the_run(runtime_repo):
+    """[EV-LIVE-03] A clean checkout after the code was imported leaves the tree clean at the new revision while the
+    old code stays loaded: a runtime file written after the runtime was imported is refused."""
+    started = time.time_ns()
+    later = started + 10 ** 9
+    os.utime(runtime_repo / "evals" / "driver.py", ns=(later, later))
+    with pytest.raises(EvalError, match="module evals.driver changed on disk after the runtime was imported"):
+        live.check_runtime_sources(root=runtime_repo, modules=_loaded(runtime_repo), rev=_head(runtime_repo),
+                                   loaded_after_ns=started)
+
+
+def test_the_time_the_runtime_was_imported_is_the_default_bound(runtime_repo, monkeypatch):
+    """[EV-LIVE-03] Without an explicit bound, the time evals.live began importing the runtime is used."""
+    monkeypatch.setattr(live, "IMPORTED_NS", 0)
+    with pytest.raises(EvalError, match="changed on disk after the runtime was imported"):
+        live.check_runtime_sources(root=runtime_repo, modules=_loaded(runtime_repo), rev=_head(runtime_repo))
+
+
 def _argv(tmp_path, spend="10", protocol_path=SMOKE):
     return ["--protocol", str(protocol_path), "--output-dir", str(tmp_path / "out"), "--confirm-spend", spend]
 
@@ -988,7 +1069,7 @@ def test_the_command_refuses_an_uncommitted_protocol(tmp_path, monkeypatch, offl
     """[EV-LIVE-03] A protocol without a committed version at HEAD exits 2 before any transport exists."""
     monkeypatch.setattr(live, "network_transport", lambda: pytest.fail("network transport constructed"))
 
-    def uncommitted(path):
+    def uncommitted(path, rev="HEAD"):
         raise EvalError(f"protocol {path} is not committed at HEAD")
 
     monkeypatch.setattr(live, "committed_bytes", uncommitted)
@@ -1004,6 +1085,29 @@ def test_the_command_refuses_an_untrue_protocol(tmp_path, monkeypatch, offline_g
     path = tmp_path / "protocol.json"
     path.write_text(json.dumps(broken), encoding="utf-8")
     assert live.main(_argv(tmp_path, protocol_path=path), env=OPT_IN) == 2
+    assert not (tmp_path / "out").exists()
+
+
+def test_the_command_pins_every_check_to_the_revision_it_records(tmp_path, monkeypatch, offline_git):
+    """[EV-LIVE-03] HEAD is read once: the protocol and the runtime sources are checked at that revision, and it is
+    the recorded repo_sha."""
+    revisions = []
+    monkeypatch.setattr(live, "committed_bytes",
+                        lambda path, rev="HEAD": revisions.append(("protocol", rev)) or Path(path).read_bytes())
+    monkeypatch.setattr(live, "check_runtime_sources", lambda rev=None: revisions.append(("runtime", rev)))
+    monkeypatch.setattr(live, "network_transport", lambda: httpx.MockTransport(OracleAPI()))
+    assert live.main(_argv(tmp_path), env=OPT_IN) == 0
+    assert revisions == [("protocol", SHA), ("runtime", SHA)]
+    assert json.loads((tmp_path / "out" / "live-run.json").read_text(encoding="utf-8"))["repo_sha"] == SHA
+
+
+def test_the_command_refuses_when_head_moves_during_the_checks(tmp_path, monkeypatch, offline_git):
+    """[EV-LIVE-03] If HEAD is not the pinned revision when the checks end, the run is refused before any transport
+    exists."""
+    heads = iter([SHA, "f" * 40])
+    monkeypatch.setattr(live, "current_repo_sha", lambda: next(heads))
+    monkeypatch.setattr(live, "network_transport", lambda: pytest.fail("network transport constructed"))
+    assert live.main(_argv(tmp_path), env=OPT_IN) == 2
     assert not (tmp_path / "out").exists()
 
 

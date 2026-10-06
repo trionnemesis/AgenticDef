@@ -20,6 +20,11 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
+
+# Taken before this module imports the runtime: a runtime source file written after this may differ from the code
+# already loaded, so a live run refuses it (EV-LIVE-03). `python -m evals.live` imports nothing earlier.
+IMPORTED_NS = time.time_ns()
 
 import httpx
 from jsonschema import Draft202012Validator, FormatChecker
@@ -174,39 +179,59 @@ def git_status():
     return done.stdout
 
 
-def committed_bytes(path, root=REPO_ROOT):
-    """The protocol's bytes at HEAD. Raises unless the file (symlinks followed) is inside the repository and
-    identical to its committed version, so a run can only use a protocol that `repo_sha` reproduces."""
+def _committed(path, root, rev, what):
     root, resolved = Path(root).resolve(), Path(path).resolve()
     try:
         relative = resolved.relative_to(root).as_posix()
     except ValueError:
-        raise EvalError(f"protocol {path} is outside the repository; commit it first") from None
+        raise EvalError(f"{what} {path} is outside the repository; commit it first") from None
     try:
-        committed = subprocess.run(["git", "show", f"HEAD:{relative}"], cwd=root, capture_output=True, check=True,
+        committed = subprocess.run(["git", "show", f"{rev}:{relative}"], cwd=root, capture_output=True, check=True,
                                    timeout=30).stdout
     except subprocess.CalledProcessError:
-        raise EvalError(f"protocol {relative or path} is not committed at HEAD") from None
+        raise EvalError(f"{what} {relative or path} is not committed at {rev}") from None
     except (OSError, subprocess.SubprocessError) as exc:
         raise EvalError("cannot run git show") from exc
     try:
         on_disk = resolved.read_bytes()
     except OSError as exc:
-        raise EvalError(f"protocol {path} is not a readable file ({type(exc).__name__})") from exc
+        raise EvalError(f"{what} {path} is not a readable file ({type(exc).__name__})") from exc
     if on_disk != committed:
-        raise EvalError(f"protocol {relative} differs from its committed version at HEAD")
+        raise EvalError(f"{what} {relative} differs from its committed version at {rev}")
     return committed
 
 
-def check_runtime_sources(root=REPO_ROOT, modules=None):
+def committed_bytes(path, root=REPO_ROOT, rev="HEAD"):
+    """The protocol's bytes at `rev`. Raises unless the file (symlinks followed) is inside the repository and
+    identical to its version at `rev`, so a run can only use a protocol that `repo_sha` reproduces."""
+    return _committed(path, root, rev, "protocol")
+
+
+def check_runtime_sources(root=REPO_ROOT, modules=None, rev=None, loaded_after_ns=None):
     """Every loaded agenticdef and evals module must come from this checkout, or repo_sha would not name the code
-    that ran (an installed wheel or another path can shadow it)."""
+    that ran (an installed wheel or another path can shadow it).
+
+    With `rev`, each module's file must also equal its blob at that revision and must not have been written since
+    this module began importing the runtime, so the code already loaded is the code at `rev` even if the checkout
+    moved after the imports."""
     root = Path(root).resolve()
     homes = {"agenticdef": root / "src" / "agenticdef", "evals": root / "evals"}
+    if rev is not None and loaded_after_ns is None:
+        loaded_after_ns = IMPORTED_NS
     for name, module in list((sys.modules if modules is None else modules).items()):
+        # `python -m evals.live` runs this module as __main__; judge it by its real name.
+        name = getattr(getattr(module, "__spec__", None), "name", None) or name
         home, file = homes.get(name.split(".")[0]), getattr(module, "__file__", None)
-        if home is not None and file is not None and not Path(file).resolve().is_relative_to(home):
+        if home is None or file is None:
+            continue
+        path = Path(file).resolve()
+        if not path.is_relative_to(home):
             raise EvalError(f"module {name} is loaded from {file}, not from this checkout ({home})")
+        if rev is not None:
+            _committed(path, root, rev, f"module {name}")
+            if path.stat().st_mtime_ns >= loaded_after_ns:
+                raise EvalError(f"module {name} changed on disk after the runtime was imported, so the loaded code "
+                                f"may not be the code at {rev}")
 
 
 def _refuse(message):
@@ -228,7 +253,9 @@ def main(argv=None, env=None):
     if not api_key:
         return _refuse("ANTHROPIC_API_KEY is not set")
     try:
-        protocol = _parse_protocol(committed_bytes(args.protocol), args.protocol)
+        # One revision for every check, and the one recorded: a commit or checkout in between cannot split them.
+        pinned = current_repo_sha()
+        protocol = _parse_protocol(committed_bytes(args.protocol, rev=pinned), args.protocol)
         cap = protocol["caps"]["max_cost_usd"]
         try:
             confirmed = Decimal(args.confirm_spend)
@@ -238,9 +265,10 @@ def main(argv=None, env=None):
             return _refuse(f"--confirm-spend must equal the protocol's caps.max_cost_usd ({cap})")
         if git_status():
             return _refuse("the working tree is not clean; commit the protocol and the code first")
-        check_runtime_sources()
-        repo_sha = current_repo_sha()
-        result = run_live(protocol, output_dir=args.output_dir, api_key=api_key, repo_sha=repo_sha,
+        check_runtime_sources(rev=pinned)
+        if current_repo_sha() != pinned:
+            return _refuse("HEAD moved while the run was being checked; start it on a checkout nobody is changing")
+        result = run_live(protocol, output_dir=args.output_dir, api_key=api_key, repo_sha=pinned,
                           connect=network_transport)
     except EvalError as exc:
         return _refuse(str(exc))
