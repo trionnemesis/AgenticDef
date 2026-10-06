@@ -682,27 +682,30 @@ name.
   a cancellation is delivered only once and nothing else would bound a close
   awaited after it; a close that overruns it also stops the run
   (`transport_error`), so a close cannot hold a case past its deadline by more
-  than that bound. A non-2xx status stops the run (`http_status`), a body over
-  65536 bytes stops it (`response_too_large`), missing or invalid `usage`,
-  including a body the parser cannot read for any reason such as its depth
-  limit, stops it (`usage_missing`; a count must be an integer from 0 to
-  `2**53-1`, the largest a JSON number holds exactly, which with prices of at
-  most 1000 USD per million tokens also keeps every charged cost finite), a
-  `model` other than the protocol's stops it (`served_model_mismatch`), and
-  actual input tokens above the bound, output tokens above `max_tokens` or an
-  actual cost above the worst case stop it (`worst_case_exceeded`). Any other
-  exception while checking a sent call's response stops it too
-  (`response_unchecked`), so a sent call either returns a fully checked
-  response or stops the run. Every stop detail is at most 500 characters: a
-  longer one keeps its start and ends with its length and the SHA-256 of the
-  full text, and a request or reply value that is a JSON array or object is
-  named by kind, never rendered. Cost is input, output, cache-write and
-  cache-read tokens times their prices, divided by one million, in exact
-  decimal arithmetic. Every sent call is charged exactly once, whatever way
-  the request ends: its actual usage once that is read, otherwise its worst
-  case (counted in `worst_case_charged`), including a call the runtime
-  deadline cancels at any point, which ends the case in `BudgetError` but does
-  not by itself stop the run. So the ledger never under-reports spend.
+  than that bound. A non-2xx status stops the run (`http_status`); a status
+  outside 100-599, which RFC 9110 calls invalid, is counted under `invalid` in
+  `http_statuses` with the raw value in the detail, so every value taken from
+  a reply is bounded or normalized before it is recorded. A body over 65536
+  bytes stops it (`response_too_large`), missing or invalid `usage`, including
+  a body the parser cannot read for any reason such as its depth limit, stops
+  it (`usage_missing`; a count must be an integer from 0 to `2**53-1`, the
+  largest a JSON number holds exactly, which with prices of at most 1000 USD
+  per million tokens also keeps every charged cost finite), a `model` other
+  than the protocol's stops it (`served_model_mismatch`), and actual input
+  tokens above the bound, output tokens above `max_tokens` or an actual cost
+  above the worst case stop it (`worst_case_exceeded`). Any other exception
+  while checking a sent call's response stops it too (`response_unchecked`),
+  so a sent call either returns a fully checked response or stops the run.
+  Every stop detail is at most 500 characters: a longer one keeps its start
+  and ends with its length and the SHA-256 of the full text, and a request or
+  reply value that is a JSON array or object is named by kind, never rendered.
+  Cost is input, output, cache-write and cache-read tokens times their prices,
+  divided by one million, in exact decimal arithmetic. Every sent call is
+  charged exactly once, whatever way the request ends: its actual usage once
+  that is read, otherwise its worst case (counted in `worst_case_charged`),
+  including a call the runtime deadline cancels at any point, which ends the
+  case in `BudgetError` but does not by itself stop the run. So the ledger
+  never under-reports spend.
 - EV-LIVE-05: Stop. Once stopped, every later request raises before it
   reaches the inner transport (so the adapter fails that call closed), and
   the driver aborts before the next case. A stopped run has `status:

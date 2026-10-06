@@ -160,10 +160,12 @@ class MeteredTransport(httpx.AsyncBaseTransport):
         accounted = False
         try:
             response, data = await self._exchange(request)
-            status = str(response.status_code)
+            code = response.status_code
+            # RFC 9110 section 15: a status outside 100-599 is invalid; it is counted as such, never as a key.
+            status = str(code) if 100 <= code <= 599 else "invalid"
             self._statuses[status] = self._statuses.get(status, 0) + 1
-            if not 200 <= response.status_code < 300:
-                self._halt("http_status", status)
+            if not 200 <= code < 300:
+                self._halt("http_status", status if status != "invalid" else f"{code} is not an HTTP status (100-599)")
             if len(data) > MAX_RESPONSE_BYTES:
                 self._halt("response_too_large", f"more than {MAX_RESPONSE_BYTES} bytes")
             try:

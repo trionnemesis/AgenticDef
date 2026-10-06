@@ -393,6 +393,27 @@ def test_the_largest_exact_usage_count_is_charged_as_reported(protocol, key):
     assert math.isfinite(ledger["cost_usd"]) and ledger["cost_usd"] > protocol["caps"]["max_cost_usd"]
 
 
+@pytest.mark.parametrize("code", [0, 99, 600, 700, 999, 1000])
+def test_a_status_outside_http_is_counted_as_invalid(protocol, code):
+    """[EV-LIVE-04] RFC 9110 calls a status outside 100-599 invalid: it stops the run like any non-2xx status and
+    is counted under "invalid", so the ledger keeps the audit schema; the raw value is in the detail."""
+    transport = metered(protocol, lambda r: httpx.Response(code, content=b"{}"))
+    with pytest.raises(ModelError):
+        call(transport)
+    assert transport.stop == {"condition": "http_status", "detail": f"{code} is not an HTTP status (100-599)"}
+    assert transport.ledger()["http_statuses"] == {"invalid": 1} and transport.ledger()["worst_case_charged"] == 1
+
+
+@pytest.mark.parametrize("code", [100, 599])
+def test_the_edges_of_the_http_status_range_are_counted_as_themselves(protocol, code):
+    """[EV-LIVE-04] 100 and 599 are HTTP statuses: counted under their own code and stopping as non-2xx."""
+    transport = metered(protocol, lambda r: httpx.Response(code, content=b"{}"))
+    with pytest.raises(ModelError):
+        call(transport)
+    assert transport.stop == {"condition": "http_status", "detail": str(code)}
+    assert transport.ledger()["http_statuses"] == {str(code): 1}
+
+
 def test_a_response_too_deep_to_parse_stops_the_run(protocol):
     """[EV-LIVE-04] [EV-LIVE-05] A body under the size limit can still exceed the parser's depth limit: that is
     unreadable usage, so the call is charged its worst case and the run stops."""
@@ -723,6 +744,33 @@ def test_an_absurd_usage_count_still_leaves_a_strict_json_live_run(protocol, tmp
     """[EV-LIVE-04] [EV-LIVE-06] The audit record of a run stopped by absurd usage is standard JSON."""
     result = _run(protocol, tmp_path, lambda r: finish(r, usage=_usage(input_tokens=10 ** 400)))
     assert result["stop"]["condition"] == "usage_missing"
+    assert _strict_json(tmp_path / "live" / "live-run.json") == result
+
+
+HOSTILE = [
+    pytest.param(lambda r: httpx.Response(700, content=b"{}"), "http_status", id="status-700"),
+    pytest.param(lambda r: httpx.Response(0, content=b"{}"), "http_status", id="status-0"),
+    pytest.param(lambda r: httpx.Response(200, content=b"x" * 65537), "response_too_large", id="too-large"),
+    pytest.param(lambda r: httpx.Response(200, content=DEEP), "usage_missing", id="deep"),
+    pytest.param(lambda r: httpx.Response(200, content=b"\xff\xfe not json"), "usage_missing", id="not-json"),
+    pytest.param(lambda r: finish(r, usage=_usage(input_tokens=-1)), "usage_missing", id="negative-usage"),
+    pytest.param(lambda r: finish(r, usage=_usage(output_tokens=10 ** 400)), "usage_missing", id="huge-usage"),
+    pytest.param(lambda r: finish(r, usage=_usage(input_tokens=2 ** 53 - 1)), "worst_case_exceeded", id="max-usage"),
+    pytest.param(_served("m" * 60000), "served_model_mismatch", id="long-model"),
+    pytest.param(_served({"nested": [[[]]]}), "served_model_mismatch", id="object-model"),
+    pytest.param(lambda r: httpx.Response(200, content=json.dumps({**sonnet_reply({"type": "finish"}, r),
+                                                                   "model": "\ud800" * 300}).encode()),
+                 "served_model_mismatch", id="lone-surrogate-model"),
+]
+
+
+@pytest.mark.parametrize("handler, condition", HOSTILE)
+def test_a_hostile_reply_still_leaves_a_schema_valid_live_run(protocol, tmp_path, handler, condition):
+    """[EV-LIVE-04] [EV-LIVE-06] Whatever a reply holds, the stopped run's audit record is written, valid against
+    its schema and standard JSON: every value taken from a reply is bounded or normalized first."""
+    result = _run(protocol, tmp_path, handler)
+    assert (result["status"], result["stop"]["condition"], result["metrics"]) == ("stopped", condition, None)
+    assert list(LIVE_RUN.iter_errors(result)) == []
     assert _strict_json(tmp_path / "live" / "live-run.json") == result
 
 
