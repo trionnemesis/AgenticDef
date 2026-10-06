@@ -17,6 +17,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -34,6 +35,8 @@ from .runner import REPO_ROOT, EvalError, current_repo_sha
 
 LIVE_RUN_VERSION = "1"
 
+# The key goes out as a header that the HTTP client builds before the metered transport sees the request.
+_HEADER_SAFE_KEY = re.compile(r"[\x21-\x7e]+")
 _PROTOCOL_VALIDATOR = Draft202012Validator(load_schema("protocol.schema.json"), format_checker=FormatChecker())
 _LIVE_RUN_VALIDATOR = Draft202012Validator(load_schema("live-run.schema.json"), format_checker=FormatChecker())
 
@@ -111,9 +114,17 @@ def load_protocol(path):
     return _parse_protocol(data, path)
 
 
+def check_api_key(key):
+    """A key the HTTP client cannot put in a header would fail every case before the meter sees a request, so only
+    visible ASCII is accepted. The message never repeats the key."""
+    if not isinstance(key, str) or not _HEADER_SAFE_KEY.fullmatch(key):
+        raise EvalError("ANTHROPIC_API_KEY must be visible ASCII with no whitespace")
+
+
 def run_live(protocol, *, output_dir, api_key, repo_sha, connect):
     """Run one protocol through the metered transport and write live-run.json (EV-LIVE-05, EV-LIVE-06)."""
     digest, generated = _check(protocol)
+    check_api_key(api_key)
     output_dir = Path(output_dir)
     if output_dir.exists():
         raise EvalError("output_dir already exists; a live run never reuses a directory")
@@ -134,10 +145,14 @@ def run_live(protocol, *, output_dir, api_key, repo_sha, connect):
     except EvalError:
         if transport.stop is None:
             raise
-    stopped = transport.stop is not None
+    stop, ledger = transport.stop, transport.ledger()
+    if stop is None and ledger["calls"] == 0:
+        # Every case ended before a request reached the transport, so nothing about the model was measured.
+        stop = {"condition": "no_model_calls", "detail": "no request reached the API, so the run measured nothing"}
+    stopped = stop is not None
     result = {"live_run_version": LIVE_RUN_VERSION, "protocol_id": protocol["protocol_id"], "protocol_digest": digest,
               "protocol": protocol, "repo_sha": repo_sha, "status": "stopped" if stopped else "completed",
-              "stop": transport.stop, "ledger": transport.ledger(), "metrics": None if stopped else metrics}
+              "stop": stop, "ledger": ledger, "metrics": None if stopped else metrics}
     _require_finite(result, "live run")
     _require_valid(_LIVE_RUN_VALIDATOR, result, "live run")
     (output_dir / "live-run.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")

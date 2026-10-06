@@ -653,17 +653,20 @@ name.
   families are schema rules.
 - EV-LIVE-03: Opt-in. `python -m evals.live --protocol P --output-dir D
   --confirm-spend USD` runs only when the environment sets
-  `AGENTICDEF_LIVE_EVAL=1` and a non-empty `ANTHROPIC_API_KEY`,
-  `--confirm-spend` equals `caps.max_cost_usd`, `git status --porcelain` is
-  empty, and the `--protocol` file resolves (symlinks followed) to a path
-  inside the repository whose bytes equal its version at `HEAD` (`git show
-  HEAD:<path>`; an untracked, ignored or outside file has none), and every
-  loaded `agenticdef` and `evals` module comes from this checkout's
-  `src/agenticdef/` and `evals/` (not an installed wheel or another path). The
-  run uses those committed bytes, so the protocol and code that ran are the
-  recorded `repo_sha`. Otherwise it exits non-zero before any network
-  transport is constructed. Tests and CI never set the opt-in; every test
-  injects the inner transport, so no test opens a connection.
+  `AGENTICDEF_LIVE_EVAL=1` and an `ANTHROPIC_API_KEY` of visible ASCII with no
+  whitespace (the HTTP client builds its header before the metered transport
+  sees a request, so a key it cannot encode would fail every case unseen by
+  the meter; the refusal never repeats the key), `--confirm-spend` equals
+  `caps.max_cost_usd`, `git status --porcelain` is empty, and the `--protocol`
+  file resolves (symlinks followed) to a path inside the repository whose
+  bytes equal its version at `HEAD` (`git show HEAD:<path>`; an untracked,
+  ignored or outside file has none), and every loaded `agenticdef` and `evals`
+  module comes from this checkout's `src/agenticdef/` and `evals/` (not an
+  installed wheel or another path). The run uses those committed bytes, so the
+  protocol and code that ran are the recorded `repo_sha`. Otherwise it exits
+  non-zero before any network transport is constructed. Tests and CI never set
+  the opt-in; every test injects the inner transport, so no test opens a
+  connection.
 - EV-LIVE-04: Metering. Every request passes through `MeteredTransport`, which
   never retries and opens a fresh inner transport per request through its
   injected `connect` callable (each case runs in its own event loop). Before
@@ -706,11 +709,13 @@ name.
   including a call the runtime deadline cancels at any point, which ends the
   case in `BudgetError` but does not by itself stop the run. So the ledger
   never under-reports spend.
-- EV-LIVE-05: Stop. Once stopped, every later request raises before it
-  reaches the inner transport (so the adapter fails that call closed), and
-  the driver aborts before the next case. A stopped run has `status:
-  "stopped"`, its `stop` names the first condition, and `metrics` is `null`:
-  partial metrics are never reported. The command exits non-zero.
+- EV-LIVE-05: Stop. Once stopped, every later request raises before it reaches
+  the inner transport (so the adapter fails that call closed), and the driver
+  aborts before the next case. A stopped run has `status: "stopped"`, its
+  `stop` names the first condition, and `metrics` is `null`: partial metrics
+  are never reported. A run in which no request reached the API, because every
+  case ended before its first call, measured nothing: it is stopped
+  (`no_model_calls`), never completed. The command exits non-zero.
 - EV-LIVE-06: Run. `run_live(protocol, *, output_dir, api_key, repo_sha,
   connect)` checks the protocol (EV-LIVE-02), requires that `output_dir` does
   not exist, regenerates the set, and runs `harness.evaluate` with one

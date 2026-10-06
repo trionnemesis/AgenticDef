@@ -47,7 +47,7 @@
       "properties": {
         "condition": {"enum": ["request_mismatch", "max_model_calls", "max_cost_usd", "transport_error", "http_status",
                                "response_too_large", "usage_missing", "served_model_mismatch",
-                               "worst_case_exceeded", "response_unchecked"]},
+                               "worst_case_exceeded", "response_unchecked", "no_model_calls"]},
         "detail": {"type": "string", "minLength": 1, "maxLength": 500}
       }
     }

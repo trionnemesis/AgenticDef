@@ -791,6 +791,32 @@ def test_a_live_run_with_a_non_finite_number_is_never_written(protocol, tmp_path
     assert not (tmp_path / "live" / "live-run.json").exists()
 
 
+@pytest.mark.parametrize("key", ["sk-ant-\u00fc", "sk-ant-key\n", "sk ant", "\tsk-ant", "", None])
+def test_run_live_refuses_a_key_that_is_not_visible_ascii(protocol, tmp_path, key):
+    """[EV-LIVE-03] The HTTP client builds the key's header before the metered transport sees the request, so a key
+    it cannot encode would fail every case unseen by the meter: it is refused before anything is written or opened,
+    and the message never repeats the key."""
+    opened = []
+    with pytest.raises(EvalError, match="ANTHROPIC_API_KEY must be visible ASCII") as refused:
+        run_live(protocol, output_dir=tmp_path / "live", api_key=key, repo_sha=SHA,
+                 connect=lambda: opened.append(1))
+    assert opened == [] and not (tmp_path / "live").exists()
+    assert not key or key.strip() not in str(refused.value)
+
+
+def test_a_run_in_which_no_request_reached_the_api_is_never_completed(protocol, tmp_path, monkeypatch):
+    """[EV-LIVE-05] [EV-LIVE-06] If every case ends before a request reaches the transport (here the HTTP client
+    rejects the key, with the key check bypassed), the run measured nothing: it is stopped, never completed."""
+    monkeypatch.setattr(live, "check_api_key", lambda key: None)
+    api = OracleAPI()
+    result = run_live(protocol, output_dir=tmp_path / "live", api_key="sk-ant-\u00fc", repo_sha=SHA,
+                      connect=lambda: httpx.MockTransport(api))
+    assert api.calls == [] and (result["status"], result["metrics"]) == ("stopped", None)
+    assert result["stop"] == {"condition": "no_model_calls",
+                              "detail": "no request reached the API, so the run measured nothing"}
+    assert _strict_json(tmp_path / "live" / "live-run.json") == result and list(LIVE_RUN.iter_errors(result)) == []
+
+
 def test_run_live_refuses_an_existing_output_dir_or_an_untrue_protocol(protocol, tmp_path):
     """[EV-LIVE-06] [EV-LIVE-02] Nothing is written or called for a used directory or a protocol that fails its
     checks."""
@@ -941,6 +967,8 @@ def _argv(tmp_path, spend="10", protocol_path=SMOKE):
     pytest.param({**OPT_IN, "AGENTICDEF_LIVE_EVAL": "true"}, "10", "", id="opt-in-not-1"),
     pytest.param({"AGENTICDEF_LIVE_EVAL": "1"}, "10", "", id="no-key"),
     pytest.param({**OPT_IN, "ANTHROPIC_API_KEY": ""}, "10", "", id="empty-key"),
+    pytest.param({**OPT_IN, "ANTHROPIC_API_KEY": "sk-ant-\u00fc"}, "10", "", id="non-ascii-key"),
+    pytest.param({**OPT_IN, "ANTHROPIC_API_KEY": "sk-ant-key\n"}, "10", "", id="key-with-newline"),
     pytest.param(OPT_IN, "9.99", "", id="spend-below-cap"),
     pytest.param(OPT_IN, "100", "", id="spend-above-cap"),
     pytest.param(OPT_IN, "ten", "", id="spend-not-a-number"),
