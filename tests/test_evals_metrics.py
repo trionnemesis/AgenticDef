@@ -398,7 +398,7 @@ def test_reports_are_reproducible_with_the_step_clock(gen, tmp_path):
     ({"providers": []}, "provider"),
     ({"providers": baseline_providers()[:1] * 2}, "unique"),
     ({"providers": [{"name": "Bad Name", "mode": "baseline", "factory": lambda c, t: AlwaysBenign()}]}, "name"),
-    ({"providers": [{"name": "x", "mode": "live", "factory": lambda c, t: AlwaysBenign()}]}, "mode"),
+    ({"providers": [{"name": "x", "mode": "Live", "factory": lambda c, t: AlwaysBenign()}]}, "mode"),
     ({"providers": [{"name": "x", "mode": "baseline", "factory": None}]}, "factory"),
     ({"providers": [{"name": "x", "mode": "baseline"}]}, "provider"),
     ({"families": []}, "famil"), ({"families": ["f-0000000000"]}, "famil"),

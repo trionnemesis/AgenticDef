@@ -2,8 +2,10 @@
 
 Normative text: evals/SPEC.md, sections 5 and 6. The runner executes the SAME
 runtime as replay (Investigator, FixtureTools, JsonRepository, SystemClock) with
-a single submission and adds no capability: no network, no live mode, and git
-(`rev-parse HEAD`) is the only subprocess.
+a single submission and adds no capability. It never makes a network call
+itself: `live` mode only accepts the metered transport built by `evals.live`
+under a committed protocol (section 11). git (`rev-parse HEAD`) is the only
+subprocess.
 """
 import asyncio
 from copy import deepcopy
@@ -32,7 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 REPORT_VERSION = "1"
 # Mode -> the model provenances the persisted record may carry. Evidence is always fixture evidence.
 MODE_MODEL_PROVIDERS = {"replay": ("deterministic_replay",), "mock": ("anthropic_api",),
-                        "baseline": tuple(sorted(BASELINE_PROVENANCES))}
+                        "baseline": tuple(sorted(BASELINE_PROVENANCES)), "live": ("anthropic_api",)}
 EVIDENCE_PROVIDER = "synthetic_fixture"
 CHECK_NAMES = ("status", "risk", "termination_reason", "terminal", "forbidden_tools",
                "required_methods", "grounding", "forbidden_claims")
@@ -63,16 +65,30 @@ class StepClock:
 
 
 def _require_mode(mode):
-    if mode == "live":
-        raise EvalError("mode 'live' is not available: live runs need maintainer decision D8")
     if not isinstance(mode, str) or mode not in MODE_MODEL_PROVIDERS:
-        raise EvalError(f"unsupported mode {mode!r}; expected 'replay', 'mock' or 'baseline'")
+        raise EvalError(f"unsupported mode {mode!r}; expected one of {sorted(MODE_MODEL_PROVIDERS)}")
 
 
-def _refuse_network_adapter(model):
-    # An Anthropic adapter without an injected (mock) transport would call the real API.
-    if getattr(model, "provenance", None) == "anthropic_api" and getattr(model, "_transport", None) is None:
+def _check_transport(mode, model):
+    """A mock run can never reach the network, and a network run can never be labeled mock (EV-RUN-08)."""
+    live_refusal = "mode 'live' runs only an anthropic_api adapter over the MeteredTransport of a protocol"
+    if getattr(model, "provenance", None) != "anthropic_api":
+        if mode == "live":
+            raise EvalError(live_refusal)
+        return
+    transport = getattr(model, "_transport", None)
+    if transport is None:
         raise EvalError("refusing an anthropic_api adapter without an injected transport: it would use the network")
+    # Imported only here: the HTTP adapter already needs httpx, and offline modes never do.
+    from httpx import MockTransport
+    from .metering import MeteredTransport
+    if mode == "live":
+        if not isinstance(transport, MeteredTransport):
+            raise EvalError(live_refusal)
+    elif mode != "mock":
+        raise EvalError(f"provenance: mode {mode!r} never runs an anthropic_api adapter")
+    elif not isinstance(transport, MockTransport):
+        raise EvalError("mode 'mock' needs an httpx.MockTransport; any other transport could reach the network")
 
 
 def _provenance(record, model, tools):
@@ -145,7 +161,7 @@ def execute_case(case, *, mode, model, output_dir, clock=None):
     _require_mode(mode)
     validate_case(case)
     oracle_result = oracle.evaluate(case)
-    _refuse_network_adapter(model)
+    _check_transport(mode, model)
     output_dir = Path(output_dir)
     try:
         output_dir.mkdir(parents=True)

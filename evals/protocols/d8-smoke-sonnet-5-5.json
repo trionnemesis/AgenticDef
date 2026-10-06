@@ -1,0 +1,39 @@
+{
+  "protocol_version": "1",
+  "protocol_id": "d8-smoke-sonnet-5-5",
+  "decision": "trionnemesis/AgenticDef#2 D8, maintainer, 2026-10-02: adapter option A (ignore thinking blocks), model claude-sonnet-5-5, smoke first (dev, three families, k=1, at most US$10), no retries",
+  "operator": "trionnemesis",
+  "purpose": "smoke",
+  "provider": {
+    "endpoint": "https://api.anthropic.com/v1/messages",
+    "anthropic_version": "2023-06-01",
+    "model": "claude-sonnet-5-5",
+    "max_tokens": 4096,
+    "thinking": "api_default",
+    "effort": "api_default",
+    "fallbacks": "none",
+    "retries": 0
+  },
+  "set": {
+    "generator_version": "rbac-gen-2",
+    "oracle_version": "rbac-oracle-1",
+    "generator_seed": 0,
+    "holdout_fraction": 0.3,
+    "split": "dev",
+    "families": ["f-02606c4f66", "f-131e41ff1e", "f-134714ab4b"],
+    "cases": 20
+  },
+  "k": 1,
+  "caps": {"max_cost_usd": 10, "max_model_calls": 320},
+  "prices": {
+    "input_usd_per_mtok": 2.0,
+    "output_usd_per_mtok": 10.0,
+    "cache_write_usd_per_mtok": 2.5,
+    "cache_read_usd_per_mtok": 0.2,
+    "source": "Anthropic first-party list price for claude-sonnet-5-5 as cached in the claude-api skill bundle; cache write is the 5-minute rate (1.25 x input). Re-check before running.",
+    "as_of": "2026-09-25"
+  },
+  "input_overhead_tokens": 256,
+  "data_scope": "Synthetic generated cases derived from the shipped S01/S02 fixtures only; no cluster, customer or personal data. Sent to the Anthropic first-party Messages API under the operator's account retention settings.",
+  "analysis": "Smoke only: report status, stop condition, ledger, termination reasons, adapter_or_format_failure and usage from the section 10 report. No accuracy, robustness or generalization claim; the holdout split is not touched."
+}
