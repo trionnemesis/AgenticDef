@@ -675,17 +675,19 @@ name.
   priced at the largest of the input, cache-write and cache-read prices plus
   `max_tokens` at the output price, so no split of the input tokens across the
   three rates can cost more. After sending: an exception from the inner
-  transport stops the run (`transport_error`), a non-2xx status stops it
-  (`http_status`), a body over 65536 bytes stops it (`response_too_large`),
-  missing or invalid `usage` stops it (`usage_missing`), a `model` other than
-  the protocol's stops it (`served_model_mismatch`), and actual input tokens
-  above the bound, output tokens above `max_tokens` or an actual cost above
-  the worst case stop it (`worst_case_exceeded`). Cost is input, output,
-  cache-write and cache-read tokens times their prices, divided by one
-  million, in exact decimal arithmetic. A sent call whose usage cannot be
-  read, including one the runtime deadline cancels (which ends the case in
-  `BudgetError` but does not stop the run), is charged its worst case and
-  counted in `worst_case_charged`, so the ledger never under-reports spend.
+  transport, including one raised while closing it, stops the run
+  (`transport_error`; a failed close never masks an earlier failure), a
+  non-2xx status stops it (`http_status`), a body over 65536 bytes stops it
+  (`response_too_large`), missing or invalid `usage` stops it
+  (`usage_missing`), a `model` other than the protocol's stops it
+  (`served_model_mismatch`), and actual input tokens above the bound, output
+  tokens above `max_tokens` or an actual cost above the worst case stop it
+  (`worst_case_exceeded`). Cost is input, output, cache-write and cache-read
+  tokens times their prices, divided by one million, in exact decimal
+  arithmetic. A sent call whose usage cannot be read, including one the
+  runtime deadline cancels (which ends the case in `BudgetError` but does not
+  stop the run), is charged its worst case and counted in
+  `worst_case_charged`, so the ledger never under-reports spend.
 - EV-LIVE-05: Stop. Once stopped, every later request raises before it
   reaches the inner transport (so the adapter fails that call closed), and
   the driver aborts before the next case. A stopped run has `status:

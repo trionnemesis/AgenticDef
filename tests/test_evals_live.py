@@ -374,6 +374,57 @@ def test_a_call_cancelled_by_the_runtime_deadline_is_charged_its_worst_case(prot
     assert ledger["cost_usd"] > 0 and ledger["http_statuses"] == {}
 
 
+class ClosingFails(httpx.AsyncBaseTransport):
+    """A transport that answers through a mock handler but raises when it is closed."""
+
+    def __init__(self, handler):
+        self.inner, self.closed = httpx.MockTransport(handler), 0
+
+    async def handle_async_request(self, request):
+        return await self.inner.handle_async_request(request)
+
+    async def aclose(self):
+        self.closed += 1
+        raise RuntimeError("close failed")
+
+
+def test_a_failure_while_closing_the_transport_stops_the_run_and_charges_the_call(protocol):
+    """[EV-LIVE-04] [EV-LIVE-05] A billed reply followed by a failed close is a transport error: the call is
+    charged its worst case, the run stops, and later requests never reach the API."""
+    sent = []
+    transport = MeteredTransport(protocol, connect=lambda: ClosingFails(lambda r: sent.append(r) or finish(r)))
+    for _ in range(2):
+        with pytest.raises(ModelError):
+            call(transport)
+    ledger = transport.ledger()
+    assert len(sent) == 1 and transport.stop["condition"] == "transport_error" and "clos" in transport.stop["detail"]
+    assert (ledger["calls"], ledger["worst_case_charged"]) == (1, 1) and ledger["cost_usd"] > 0
+
+
+def test_a_failed_close_never_masks_the_first_failure(protocol):
+    """[EV-LIVE-04] When sending already failed, a failing close neither replaces that stop nor charges twice."""
+    transport = MeteredTransport(protocol, connect=lambda: ClosingFails(_raise_connect_error))
+    with pytest.raises(ModelError):
+        call(transport)
+    assert transport.stop == {"condition": "transport_error", "detail": "ConnectError"}
+    assert (transport.ledger()["calls"], transport.ledger()["worst_case_charged"]) == (1, 1)
+
+
+def test_a_cancelled_call_whose_close_fails_is_charged_once_and_still_cancelled(protocol):
+    """[EV-LIVE-04] A deadline cancellation stays a cancellation even if closing fails; it is charged once and
+    does not stop the run."""
+    async def slow(request):
+        await asyncio.sleep(5)
+        return finish(request)
+
+    transport = MeteredTransport(protocol, connect=lambda: ClosingFails(slow))
+    adapter = AnthropicModel(model=MODEL, api_key="test-placeholder", transport=transport)
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(asyncio.wait_for(adapter.choose_action({"evidence": []}, ("get_change_event",)), timeout=0.05))
+    assert transport.stop is None
+    assert (transport.ledger()["calls"], transport.ledger()["worst_case_charged"]) == (1, 1)
+
+
 @pytest.mark.parametrize("content", [b"not json", b"[1, 2]", b'"text"'])
 def test_a_request_body_that_is_not_a_json_object_is_never_sent(protocol, content):
     """[EV-LIVE-04] Anything but the adapter's JSON object request stops the run before it is sent."""

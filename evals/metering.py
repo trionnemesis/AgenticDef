@@ -104,14 +104,19 @@ class MeteredTransport(httpx.AsyncBaseTransport):
             await response.aclose()
         except Exception as exc:
             self._charge_worst_case(worst)
+            await self._close_after_failure(inner)
             self._halt("transport_error", type(exc).__name__)
         except BaseException:
             # The runtime deadline cancelled a request that was already sent and may be billed. That is a run
             # outcome (BudgetError), not an anomaly: charge the worst case and let the cancellation through.
             self._charge_worst_case(worst)
+            await self._close_after_failure(inner)
             raise
-        finally:
+        try:
             await inner.aclose()
+        except Exception as exc:
+            self._charge_worst_case(worst)
+            self._halt("transport_error", f"closing the transport failed: {type(exc).__name__}")
         status = str(response.status_code)
         self._statuses[status] = self._statuses.get(status, 0) + 1
         if not 200 <= response.status_code < 300:
@@ -139,6 +144,14 @@ class MeteredTransport(httpx.AsyncBaseTransport):
                                               f"output tokens, cost {cost} (worst {worst})")
         return httpx.Response(response.status_code, headers={"content-type": "application/json"},
                               content=bytes(data))
+
+    @staticmethod
+    async def _close_after_failure(inner):
+        """Close on a path that already failed loudly and was charged; a second error must not mask the first."""
+        try:
+            await inner.aclose()
+        except Exception:
+            pass
 
     async def aclose(self):
         """Each request opens and closes its own inner transport; there is nothing shared to close."""
