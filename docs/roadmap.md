@@ -1,7 +1,7 @@
 # Roadmap / 下一階段規劃
 
-Status checked on 2026-09-27 (Asia/Taipei), against `main` at
-[`cf7272d`](https://github.com/trionnemesis/AgenticDef/commit/cf7272d00ee2fee6c48f1667eeaf90d3eafbeeb4).
+Status checked on 2026-10-08 (Asia/Taipei), against `main` at
+[`52fabaf`](https://github.com/trionnemesis/AgenticDef/commit/52fabaf738807241300157a2362d1a18d07e9dce).
 This page sequences **existing** issues; it does
 not approve new capabilities, designs or releases. Authority order in
 [AGENTS.md](../AGENTS.md) still governs, and a human decides every merge and
@@ -20,6 +20,8 @@ publication.
 | [#9](https://github.com/trionnemesis/AgenticDef/issues/9) — follow-up tracker | Checklist complete; tracker closed | #4–#8 delivered |
 | [#16](https://github.com/trionnemesis/AgenticDef/issues/16) — public documentation consistency | Delivered in this documentation increment | README EN/ZH, Pages and this roadmap |
 | [#17](https://github.com/trionnemesis/AgenticDef/pull/17) — manual release path | Merged; publication remains a separate action | `cf7272d`, [publication](publication.md) |
+| [#20](https://github.com/trionnemesis/AgenticDef/pull/20), [#21](https://github.com/trionnemesis/AgenticDef/pull/21) — evaluation layer outside the runtime (#2 D4) | Merged; offline, not in the wheel | `9d8a63a`, `dc92906`, [evals/SPEC.md](../evals/SPEC.md) sections 1–10 |
+| [#22](https://github.com/trionnemesis/AgenticDef/pull/22) — opt-in metered live runs (#2 D8) | Merged; the smoke protocol has not been run | `52fabaf`, [evals/SPEC.md](../evals/SPEC.md) section 11 |
 | Published releases | `v0.2.0` only | [Releases](https://github.com/trionnemesis/AgenticDef/releases) |
 
 Historical local check at `c2af276` (not a current-main measurement): `pytest` 132 passed from a clean `.[dev]`
@@ -60,7 +62,7 @@ injected evidence. See [verification](verification.md).
 SPEC v0.2 permits the next version to add **one live read-only GCP/GKE
 evidence adapter**, and only after the v0.2 gates pass. No v0.3 design is
 proposed here. The unresolved questions from #2 section D need human answers first; the
-publication decision already delivered by #17 is marked below. Several
+decisions already made (publication by #17, D4 and D8) are marked below. Several
 observations resolve in opposite directions depending on these answers:
 
 1. Is the four-capability surface frozen, or is a fifth tool expected? (E1/E2)
@@ -68,7 +70,10 @@ observations resolve in opposite directions depending on these answers:
 3. What is the measured response size of a live `get_subject_bindings` in the
    target cluster, and do the 8 KiB envelope / 64 KiB context limits hold? (E5/E6)
 4. Who owns semantic correctness outside replay — a domain evaluator or an
-   external eval suite? (V1/V2; #8 only covers the offline mock boundary)
+   external eval suite? (V1/V2; #8 only covers the offline mock boundary) —
+   answered 2026-10-02 (D4): an evaluation layer outside the runtime, delivered
+   offline in #20 and #21 (RBAC reference oracle, seeded case generator,
+   baselines, clustered metrics).
 5. Is a permanently blocked crashed claim acceptable outside replay; if not,
    what authorizes reclaim, and is that authorization human? (E3/E9)
 6. Must replay artifacts be byte-reproducible by third parties? (V5)
@@ -78,12 +83,13 @@ observations resolve in opposite directions depending on these answers:
    and under what cost limit? (#2 D8) — answered 2026-10-02: adapter option A
    (skip thinking blocks), `claude-sonnet-5-5`, a smoke protocol first (20
    synthetic dev cases, k=1, at most US$10, no retries). The protocol and its
-   metered runner are committed (`evals/SPEC.md` section 11); no paid run yet.
+   metered runner are merged in #22 (`evals/SPEC.md` section 11); no paid run yet.
 
-The next candidate is a small external evaluation slice, only after human
-decisions on D4 (semantic-evaluation ownership) and D8 (provider/model/API,
-explicit opt-in and cost ceiling). Start with offline counterexamples; paid
-experiments require separate authorization. This is not an approved design.
+D4 and D8 are answered: the external evaluation slice runs offline (#20, #21),
+and an opt-in live smoke protocol with a hard cost cap is merged (#22). Running
+that protocol is a separate, paid operator step, and its result, not this page,
+should inform the questions still open above. This is not an approved v0.3
+design.
 
 A live adapter can also surface E7 (multi-item evidence accounting) and E8
 (synchronous repository outside the deadline). Treat them as entry criteria to

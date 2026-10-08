@@ -150,6 +150,8 @@ CI runs the full tests and offline replay on Python 3.11 and 3.12, builds the di
 
 M0–M5 replay and regression checks pass. M6's real provider adapter has offline protocol and shared-core integration tests, including complete S01/S02 runs over a mock HTTP transport graded by the scenario evaluator and an inverted-verdict negative control ([#8](https://github.com/trionnemesis/AgenticDef/issues/8)). These use scripted responses; an actual Anthropic API call has **not** been validated and model accuracy is unmeasured. Cloud ingestion, live GKE evidence, production operation and remediation are not implemented. [Verification](docs/verification.md) separates these boundaries.
 
+Outside the runtime, [`evals/`](evals/SPEC.md) grades semantic correctness (decision D4, [#20](https://github.com/trionnemesis/AgenticDef/pull/20), [#21](https://github.com/trionnemesis/AgenticDef/pull/21)). It holds a deterministic RBAC reference oracle for twelve privilege-escalation categories from the Kubernetes RBAC good-practices page, a seeded case generator with dev/holdout splits, trivial and deterministic baselines, and clustered metrics. It runs offline and is not shipped in the wheel. Decision D8 ([#22](https://github.com/trionnemesis/AgenticDef/pull/22)) adds an opt-in live mode that runs only under a committed protocol (`claude-sonnet-5-5`, 20 synthetic dev cases, k=1, at most US$10) and meters every call. That protocol has **not** been run, so these results show the evaluation pipeline, not model accuracy.
+
 The supplied [SPEC](SPEC-v0.2.md), [DESIGN](DESIGN-v0.2.md), [WORK ORDER](WORK_ORDER-v0.2.md), and [AGENTS](AGENTS.md) are preserved. Implementation choices for unspecified fields are recorded in [ADR 0001](docs/adr-0001.md).
 
 ## Roadmap
@@ -157,7 +159,8 @@ The supplied [SPEC](SPEC-v0.2.md), [DESIGN](DESIGN-v0.2.md), [WORK ORDER](WORK_O
 See [docs/roadmap.md](docs/roadmap.md). In short:
 
 1. **v0.2.x follow-ups delivered** — #4–#8 are closed; the [#9](https://github.com/trionnemesis/AgenticDef/issues/9) checklist is complete and its tracker is closed. [#16](https://github.com/trionnemesis/AgenticDef/issues/16) synchronizes README, Pages and this roadmap status. The manual release path is implemented ([#17](https://github.com/trionnemesis/AgenticDef/pull/17)); publishing v0.2.1 remains a separate maintainer action. No new capability or runtime semantics.
-2. **Decision gate before v0.3** — the SPEC allows one live read-only GCP/GKE evidence adapter next, but only after human answers to the open questions in [#2](https://github.com/trionnemesis/AgenticDef/issues/2) section D (capability freeze, event types, live evidence size, semantic-evaluation ownership, crashed-claim recovery, provider/model opt-in and cost limits). No v0.3 design is approved yet.
+2. **Evaluation decisions answered** — [#2](https://github.com/trionnemesis/AgenticDef/issues/2) D4: semantic correctness is owned by the evaluation layer outside the runtime ([#20](https://github.com/trionnemesis/AgenticDef/pull/20), [#21](https://github.com/trionnemesis/AgenticDef/pull/21)). D8: adapter option A, `claude-sonnet-5-5`, smoke protocol first, at most US$10 ([#22](https://github.com/trionnemesis/AgenticDef/pull/22)). Running the protocol is a separate, paid operator step.
+3. **Decision gate before v0.3** — the SPEC allows one live read-only GCP/GKE evidence adapter next, but only after human answers to the questions still open in #2 section D: capability freeze, event types, live evidence size, crashed-claim recovery and byte-reproducible replay. No v0.3 design is approved yet.
 
 Remediation, multi-agent orchestration, generic execution tools and production deployment remain out of scope.
 
