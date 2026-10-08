@@ -100,6 +100,8 @@ make build
 
 M0–M5 已完成本機 replay 與回歸；M6 已實作並通過離線 HTTP 與共享核心測試，包括以 mock HTTP transport 完整執行 S01/S02、由情境評估器評分，以及反向判定的負向控制（[#8](https://github.com/trionnemesis/AgenticDef/issues/8)）。這些是腳本化回應；真實 API 呼叫尚未實測，模型準確率未量測。沒有 live GKE adapter、雲端 dispatcher、remediation、多 agent 或生產 UI。
 
+runtime 之外，[`evals/`](evals/SPEC.md) 負責評估語意正確性（決策 D4，[#20](https://github.com/trionnemesis/AgenticDef/pull/20)、[#21](https://github.com/trionnemesis/AgenticDef/pull/21)）。內容包括：依 Kubernetes RBAC good practices 十二類權限提升寫成的 deterministic RBAC reference oracle、具 dev/holdout 分割的 seeded 案例生成器、trivial 與 deterministic 基線，以及 clustered 指標。全部離線執行，不進 wheel。決策 D8（[#22](https://github.com/trionnemesis/AgenticDef/pull/22)）新增 opt-in live 模式，只能依 commit 過的 protocol 執行（`claude-sonnet-5-5`、20 個合成 dev 案例、k=1、上限 US$10），每次呼叫都計費並設停止條件。該 protocol **尚未執行**，因此目前結果證明的是評估管線，不是模型準確率。
+
 CI 在 Python 3.11/3.12 執行完整測試與 replay、建置套件，並在 checkout 之外以 wheel 重跑 S01–S08；另有獨立 job 在乾淨環境只安裝 `.[dev]` 執行離線測試。通過後 `main` 會部署 Pages。發布版本必須由人在 `main` 手動啟動 workflow：只有在 GitHub 確認該版本不存在、版本說明與套件都與 `pyproject.toml` 版本一致時才會建立 tag 與 release，其他狀態（含查詢結果不確定）一律 fail closed。既有 Release 不會覆寫。完整狀態請看 [驗收紀錄](docs/verification.md)，架構選擇請看 [ADR](docs/adr-0001.md)。
 
 ## 下一階段
@@ -107,7 +109,8 @@ CI 在 Python 3.11/3.12 執行完整測試與 replay、建置套件，並在 che
 詳見 [docs/roadmap.md](docs/roadmap.md)。摘要：
 
 1. **v0.2.x 後續修正已交付**：#4–#8 已結案；[#9](https://github.com/trionnemesis/AgenticDef/issues/9) 清單已完成，追蹤 issue 也已關閉。[#16](https://github.com/trionnemesis/AgenticDef/issues/16) 同步 README、Pages 與 roadmap 狀態。手動發布路徑已實作（[#17](https://github.com/trionnemesis/AgenticDef/pull/17)）；發布 v0.2.1 仍是維護者另行執行的動作。不新增能力，不改 runtime 語意。
-2. **v0.3 前的決策關卡**：SPEC 允許下一版加入一個 live 唯讀 GCP/GKE 證據 adapter，但須先由人回答 [#2](https://github.com/trionnemesis/AgenticDef/issues/2) section D 的問題（能力是否凍結、事件類型、live 證據大小、語意正確性歸屬、crashed claim 回收、provider／model 明確選用與費用上限）。目前沒有已核准的 v0.3 設計。
+2. **評估相關決策已回答**：[#2](https://github.com/trionnemesis/AgenticDef/issues/2) D4：語意正確性由 runtime 外的評估層負責（[#20](https://github.com/trionnemesis/AgenticDef/pull/20)、[#21](https://github.com/trionnemesis/AgenticDef/pull/21)）。D8：adapter 選項 A、`claude-sonnet-5-5`、先跑 smoke protocol、上限 US$10（[#22](https://github.com/trionnemesis/AgenticDef/pull/22)）。執行該 protocol 是操作者另行進行的付費步驟。
+3. **v0.3 前的決策關卡**：SPEC 允許下一版加入一個 live 唯讀 GCP/GKE 證據 adapter，但須先由人回答 #2 section D 仍未決的問題：能力是否凍結、事件類型、live 證據大小、crashed claim 回收、replay 是否需位元組可重現。目前沒有已核准的 v0.3 設計。
 
 Remediation、多 agent 編排、通用執行工具與生產部署仍不在範圍內。
 
