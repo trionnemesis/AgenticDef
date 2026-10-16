@@ -6,6 +6,7 @@ moves an existing release or tag.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import subprocess
@@ -55,6 +56,33 @@ def _ensure_tag_absent_or_at(runner, repo: str, tag: str, release_sha: str) -> N
         )
 
 
+def _verify_checksums(manifest: Path, assets: Sequence[Path]) -> None:
+    """Require exactly the upload payload, in sha256sum text/binary format."""
+    expected = {path.name: path for path in assets}
+    checksums: dict[str, str] = {}
+    try:
+        lines = manifest.read_text(encoding="ascii").splitlines()
+        for line in lines:
+            match = re.fullmatch(r"([0-9a-f]{64}) [ *](.+)", line)
+            if match is None:
+                raise GuardError("Checksum manifest has an invalid entry")
+            digest, name = match.groups()
+            # Never open a path supplied by the manifest. Names must match the
+            # already selected upload payload, once each, with no extra paths.
+            if name not in expected or name in checksums:
+                raise GuardError("Checksum manifest has an unexpected or duplicate asset")
+            checksums[name] = digest
+        if checksums.keys() != expected.keys():
+            raise GuardError("Checksum manifest does not cover every release asset")
+        for name, path in expected.items():
+            with path.open("rb") as handle:
+                actual = hashlib.file_digest(handle, "sha256").hexdigest()
+            if actual != checksums[name]:
+                raise GuardError(f"Checksum mismatch for release asset: {name}")
+    except (OSError, UnicodeError) as exc:
+        raise GuardError("Checksum evidence could not be read") from exc
+
+
 def _assets(dist: Path, version: str) -> list[str]:
     wheels = sorted(dist.glob("*.whl"))
     sdists = sorted(dist.glob("*.tar.gz"))
@@ -67,6 +95,7 @@ def _assets(dist: Path, version: str) -> list[str]:
     missing = [p.name for p in extra if not p.is_file()]
     if missing:
         raise GuardError(f"Release evidence missing / 缺少發布證據: {', '.join(missing)}")
+    _verify_checksums(extra[0], [*wheels, *sdists, extra[1]])
     return [*map(str, wheels), *map(str, sdists), *map(str, extra)]
 
 

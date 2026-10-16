@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import subprocess
 from pathlib import Path
@@ -50,8 +51,11 @@ def layout(tmp_path: Path, version: str = "0.2.1", *, dist_names=None, notes=Tru
     for name in dist_names or [f"agenticdef-{version}-py3-none-any.whl", f"agenticdef-{version}.tar.gz"]:
         (dist / name).write_text("x")
     if evidence:
-        (dist / "SHA256SUMS").write_text("x")
         (dist / "replay-summary.json").write_text("{}")
+        (dist / "SHA256SUMS").write_text("".join(
+            f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n"
+            for path in sorted(dist.iterdir())
+        ), encoding="ascii")
     if notes:
         (docs / f"release-v{version}.md").write_text("notes")
     return {"dist": dist, "docs": docs}
@@ -122,6 +126,55 @@ def test_missing_release_evidence_fails_before_create(tmp_path) -> None:
     with pytest.raises(release.GuardError, match="Release evidence missing"):
         ensure(tmp_path, runner, **layout(tmp_path, evidence=False))
     assert not creates(calls)
+
+
+@pytest.mark.parametrize("name", [
+    "agenticdef-0.2.1-py3-none-any.whl", "agenticdef-0.2.1.tar.gz", "replay-summary.json",
+])
+def test_changed_asset_fails_checksum_before_create(tmp_path, name) -> None:
+    paths = layout(tmp_path)
+    (paths["dist"] / name).write_bytes(b"changed after checksumming")
+    calls, runner = recorder(result(1, stderr=ABSENT))
+    with pytest.raises(release.GuardError, match="Checksum mismatch"):
+        ensure(tmp_path, runner, **paths)
+    assert not creates(calls)
+
+
+@pytest.mark.parametrize("fault", [
+    "empty", "missing", "duplicate", "extra", "parent_path", "absolute_path",
+    "invalid_digest", "invalid_separator", "blank_line", "non_ascii",
+])
+def test_invalid_checksum_manifest_fails_before_create(tmp_path, fault) -> None:
+    paths = layout(tmp_path)
+    manifest = paths["dist"] / "SHA256SUMS"
+    lines = manifest.read_text().splitlines(keepends=True)
+    digest = hashlib.sha256(b"x").hexdigest()
+    content = {
+        "empty": "",
+        "missing": "".join(lines[:-1]),
+        "duplicate": "".join(lines + [lines[0]]),
+        "extra": "".join(lines) + f"{digest}  unrelated.txt\n",
+        "parent_path": "".join(lines[1:]) + f"{digest}  ../outside.whl\n",
+        "absolute_path": "".join(lines[1:]) + f"{digest}  /tmp/outside.whl\n",
+        "invalid_digest": "z" + "".join(lines)[1:],
+        "invalid_separator": "".join(lines).replace("  ", " ", 1),
+        "blank_line": "".join(lines) + "\n",
+        "non_ascii": "\ufffd",
+    }[fault]
+    manifest.write_text(content, encoding="utf-8")
+    calls, runner = recorder(result(1, stderr=ABSENT))
+    with pytest.raises(release.GuardError, match="Checksum"):
+        ensure(tmp_path, runner, **paths)
+    assert not creates(calls)
+
+
+def test_binary_checksum_markers_and_no_final_newline_are_accepted(tmp_path) -> None:
+    paths = layout(tmp_path)
+    manifest = paths["dist"] / "SHA256SUMS"
+    manifest.write_text(manifest.read_text().replace("  ", " *").rstrip("\n"))
+    calls, runner = recorder(result(1, stderr=ABSENT))
+    ensure(tmp_path, runner, **paths)
+    assert len(creates(calls)) == 1
 
 
 @pytest.mark.parametrize(("tag", "peeled"), [
