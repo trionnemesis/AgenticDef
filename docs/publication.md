@@ -26,7 +26,18 @@ when:
 * the version is not `MAJOR.MINOR.PATCH`, or its notes file is missing;
 * GitHub cannot confirm the release is absent (anything other than HTTP 404);
 * tag `v<version>` already exists but does not resolve to the tested commit, or cannot be resolved;
-* a built distribution does not match the version, or checksums/replay summary are missing.
+* a built distribution does not match the version, or checksums/replay summary are missing;
+* `SHA256SUMS` is unreadable or malformed, omits an upload payload, repeats an
+  entry, names an extra file/path, or disagrees with any wheel, source
+  distribution or `replay-summary.json` bytes.
+
+The checksum manifest must contain exactly those payload basenames, using
+lowercase SHA-256 digests and the text (`  `) or binary (` *`) separator emitted
+by `sha256sum`. The helper hashes the selected files again before release
+creation. This checks integrity against the manifest, not its authenticity or
+the semantic correctness of replay results. Replay timestamps need not be
+byte-reproducible across runs. The release workspace must remain unchanged
+between this check and upload; this is not a concurrent-write protection.
 
 If the release already exists it is left unchanged. The helper never
 overwrites, deletes or force-moves a release or tag, and no personal token is
