@@ -5,6 +5,7 @@ import httpx
 import pytest
 
 from agenticdef.adapters.anthropic_model import AnthropicModel, ENDPOINT
+from agenticdef.adapters.clock import SystemClock
 from agenticdef.domain.errors import ModelError, PolicyError
 from test_investigator import setup
 
@@ -115,12 +116,25 @@ def test_replay_record_cannot_masquerade_as_real_model(tmp_path):
 
 
 def test_real_adapter_budget_cancels_transport(tmp_path):
+    class Clock(SystemClock):
+        value = 0.0
+        def monotonic(self): return self.value
+
+    clock = Clock()
+    entered = []
     cancelled = []
     async def handler(request):
-        try: await asyncio.sleep(60)
-        finally: cancelled.append(True)
+        entered.append(True)
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.append(True)
+            clock.value = 0.1
+            raise
     model = AnthropicModel(model="test", api_key="test-placeholder", transport=httpx.MockTransport(handler))
     inv, event, _, tools, _ = setup(tmp_path, model=model, changes={"max_runtime_seconds": 0.1})
-    record = asyncio.run(inv.run(event))
-    assert record["result"]["termination_reason"] == "BudgetError" and cancelled
+    inv.clock = clock
+    record = asyncio.run(asyncio.wait_for(inv.run(event), timeout=5))
+    assert record["result"]["termination_reason"] == "BudgetError"
+    assert entered == [True] and cancelled == [True]
     assert not tools.executed
