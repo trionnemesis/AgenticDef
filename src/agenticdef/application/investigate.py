@@ -2,11 +2,12 @@ import asyncio
 from copy import deepcopy
 from hashlib import sha256
 
+from ..domain.capabilities import CAPABILITIES
 from ..domain.contracts import canonical, validate
 from ..domain.errors import (BudgetError, ContractError, GroundingError, InvestigationError,
                              ModelError, PersistenceError, PolicyError, ToolExecutionError)
 from ..domain.evidence import Ledger, validate_grounding
-from ..domain.runtime import Budget, Policy, TERMINAL, TOOL_ARGUMENTS, identity, transition
+from ..domain.runtime import Budget, Policy, TERMINAL, identity, transition
 
 STATUS_STATE = {"confirmed_suspicious": "COMPLETED", "likely_benign": "COMPLETED",
                 "insufficient_evidence": "INSUFFICIENT_EVIDENCE", "inconclusive": "INCONCLUSIVE",
@@ -92,7 +93,8 @@ class Investigator:
             # Validate the fixed evidence port before any provider call. Adapter
             # wiring errors must reach the typed, persisted failure path.
             dispatch = {}
-            for tool in TOOL_ARGUMENTS:
+            for capability in CAPABILITIES:
+                tool = capability.name
                 operation = getattr(self.tools, tool, None)
                 if not callable(operation):
                     audit("adapter_rejected", tool=tool, error="ContractError")

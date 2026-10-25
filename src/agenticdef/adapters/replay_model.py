@@ -6,16 +6,12 @@ Fault scripts deliberately simulate hostile/invalid model output in replay.
 from copy import deepcopy
 
 from ..domain.errors import ModelError
+from ..domain.evidence import required_requests
 
 
 def requests_for(event):
-    resource, change = event["resource"], event["change"]
-    pairs = [("get_change_event", {"event_id": event["event_id"]}),
-             ("get_rbac_object", {**resource, "version": change["before_version"]}),
-             ("get_rbac_object", {**resource, "version": change["after_version"]}),
-             ("get_subject_bindings", {"subject_id": event["actor"]["subject_id"]}),
-             ("get_approval_record", {"change_id": change["change_id"]})]
-    return [{"type": "tool_request", "tool": name, "arguments": args} for name, args in pairs]
+    return [{"type": "tool_request", "tool": name, "arguments": deepcopy(arguments)}
+            for name, arguments in required_requests(event)]
 
 
 class ReplayModel:
