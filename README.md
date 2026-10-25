@@ -152,6 +152,10 @@ M0–M5 replay and regression checks pass. M6's real provider adapter has offlin
 
 Outside the runtime, [`evals/`](evals/SPEC.md) grades semantic correctness (decision D4, [#20](https://github.com/trionnemesis/AgenticDef/pull/20), [#21](https://github.com/trionnemesis/AgenticDef/pull/21)). It holds a deterministic RBAC reference oracle for twelve privilege-escalation categories from the Kubernetes RBAC good-practices page, a seeded case generator with dev/holdout splits, trivial and deterministic baselines, and clustered metrics. It runs offline and is not shipped in the wheel. Decision D8 ([#22](https://github.com/trionnemesis/AgenticDef/pull/22)) adds an opt-in live mode that runs only under a committed protocol (`claude-sonnet-5-5`, 20 synthetic dev cases, k=1, at most US$10) and meters every call. That protocol has **not** been run, so these results show the evaluation pipeline, not model accuracy.
 
+The 2026-10-26 refactor ([#26](https://github.com/trionnemesis/AgenticDef/issues/26)) keeps the original investigation slice: [#30](https://github.com/trionnemesis/AgenticDef/pull/30) centralizes the fixed four-capability contract and required-read shapes; [#31](https://github.com/trionnemesis/AgenticDef/pull/31) separates reusable replay parsing/grading from CLI orchestration. The independent oracle, authority, budgets and failure semantics are unchanged. See the dated [acceptance evidence](docs/verification.md#2026-10-26-refactor-acceptance).
+
+**Open before live evaluation:** [#29](https://github.com/trionnemesis/AgenticDef/issues/29) reproduces a schema-provenance gap: after a schema-only revision change, cached validators can disagree with the revision recorded by a live run. Resolve this before the paid D8 smoke. Offline replay and mock CI do not verify that fix.
+
 The supplied [SPEC](SPEC-v0.2.md), [DESIGN](DESIGN-v0.2.md), [WORK ORDER](WORK_ORDER-v0.2.md), and [AGENTS](AGENTS.md) are preserved. Implementation choices for unspecified fields are recorded in [ADR 0001](docs/adr-0001.md).
 
 ## Roadmap

@@ -31,6 +31,36 @@ precedes adapter validation. See the [patch decision and limits](release-v0.2.1.
 
 The v0.2 release is experimental and documents the live-provider gap. The supplied SPEC's local definition of done can be evaluated without a cluster. This does not claim all possible interpretations of live-model acceptance are satisfied.
 
+## 2026-10-26 refactor acceptance
+
+The [#26](https://github.com/trionnemesis/AgenticDef/issues/26) review compares
+the original `4885652` baseline with the fixed capability contract
+([#30](https://github.com/trionnemesis/AgenticDef/pull/30)) and the shared replay
+helper extraction ([#31](https://github.com/trionnemesis/AgenticDef/pull/31)).
+These are dated measurements, not a live-model result or a moving test badge.
+
+| Check | Observed result |
+|---|---|
+| Local Python 3.12.14 baseline | 882 tests passed |
+| Capability refactor alone | 893 tests passed |
+| Replay helper refactor alone | 887 tests passed |
+| Both refactors combined | 898 tests passed |
+| S01–S08 with the same injected StepClock | All eight complete persisted records equal the baseline, including evidence, audit ordering, budgets and terminal results |
+| Moved replay helpers | Both function ASTs identical to the baseline implementations |
+| Capability negative controls | Tests reject deliberate schema-name drift, port-argument drift and an omitted approval read |
+| HTTP cancellation proof | A controlled setup delay reproduces the old test failure; an injected budget clock keeps real timeout/cancellation and requires transport entry plus CancelledError |
+
+The final exact-head CI runs for [#30](https://github.com/trionnemesis/AgenticDef/actions/runs/40214149917)
+and [#31](https://github.com/trionnemesis/AgenticDef/actions/runs/40213489708)
+provide Python 3.11/3.12, clean dev-extra and standalone-wheel evidence.
+Their retained artifacts contain acceptance evidence; only a successful main
+Pages deployment establishes website publication.
+
+**Unresolved live boundary:** [#29](https://github.com/trionnemesis/AgenticDef/issues/29)
+reproduces stale import-cached schema validation after a clean schema-only
+revision change. This refactor does not fix that provenance defect. The paid
+D8 protocol remains unrun; resolve #29 before exercising it.
+
 ## Reproduce
 
 ```bash

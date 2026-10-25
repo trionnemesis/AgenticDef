@@ -104,6 +104,10 @@ runtime 之外，[`evals/`](evals/SPEC.md) 負責評估語意正確性（決策 
 
 CI 在 Python 3.11/3.12 執行完整測試與 replay、建置套件，並在 checkout 之外以 wheel 重跑 S01–S08；另有獨立 job 在乾淨環境只安裝 `.[dev]` 執行離線測試。通過後 `main` 會部署 Pages。發布版本必須由人在 `main` 手動啟動 workflow：只有在 GitHub 確認該版本不存在、版本說明與套件都與 `pyproject.toml` 版本一致時才會建立 tag 與 release，其他狀態（含查詢結果不確定）一律 fail closed。既有 Release 不會覆寫。完整狀態請看 [驗收紀錄](docs/verification.md)，架構選擇請看 [ADR](docs/adr-0001.md)。
 
+2026-10-26 的重構（[#26](https://github.com/trionnemesis/AgenticDef/issues/26)）維持原始調查切片：[#30](https://github.com/trionnemesis/AgenticDef/pull/30) 整理固定四項能力的參數、scope 與必要讀取形狀；[#31](https://github.com/trionnemesis/AgenticDef/pull/31) 將可重用的 replay 載入／評分函式移出 CLI。獨立 oracle、權限、預算與失敗語意維持不變。結果見[本次驗收證據](docs/verification.md#2026-10-26-refactor-acceptance)。
+
+**live 評估前仍待修正：**[#29](https://github.com/trionnemesis/AgenticDef/issues/29) 已離線重現 schema 版本追溯缺口：只變更 schema 的版本切換後，快取 validator 與 live run 記錄的版本可不一致。付費 D8 smoke 前須先處理；離線 replay 與 mock CI 通過不代表此問題已修復。
+
 ## 下一階段
 
 詳見 [docs/roadmap.md](docs/roadmap.md)。摘要：

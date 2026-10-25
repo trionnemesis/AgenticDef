@@ -1,7 +1,10 @@
 # Roadmap / 下一階段規劃
 
-Status checked on 2026-10-08 (Asia/Taipei), against `main` at
-[`52fabaf`](https://github.com/trionnemesis/AgenticDef/commit/52fabaf738807241300157a2362d1a18d07e9dce).
+Status checked on 2026-10-26 (Asia/Taipei), including the
+[#25](https://github.com/trionnemesis/AgenticDef/pull/25) release-evidence fix,
+[#30](https://github.com/trionnemesis/AgenticDef/pull/30) and
+[#31](https://github.com/trionnemesis/AgenticDef/pull/31) refactors, and the open
+[#29](https://github.com/trionnemesis/AgenticDef/issues/29) provenance finding.
 This page sequences **existing** issues; it does
 not approve new capabilities, designs or releases. Authority order in
 [AGENTS.md](../AGENTS.md) still governs, and a human decides every merge and
@@ -23,6 +26,10 @@ publication.
 | [#20](https://github.com/trionnemesis/AgenticDef/pull/20), [#21](https://github.com/trionnemesis/AgenticDef/pull/21) — evaluation layer outside the runtime (#2 D4) | Merged; offline, not in the wheel | `9d8a63a`, `dc92906`, [evals/SPEC.md](../evals/SPEC.md) sections 1–10 |
 | [#22](https://github.com/trionnemesis/AgenticDef/pull/22) — opt-in metered live runs (#2 D8) | Merged; the smoke protocol has not been run | `52fabaf`, [evals/SPEC.md](../evals/SPEC.md) section 11 |
 | Published releases | `v0.2.0` only | [Releases](https://github.com/trionnemesis/AgenticDef/releases) |
+| [#24](https://github.com/trionnemesis/AgenticDef/issues/24) — release asset checksums | Fixed, closed | [#25](https://github.com/trionnemesis/AgenticDef/pull/25), `4885652` |
+| [#27](https://github.com/trionnemesis/AgenticDef/issues/27) — fixed capability/read contract | Merged; behavior-preserving | [#30](https://github.com/trionnemesis/AgenticDef/pull/30), `tests/test_capabilities.py` |
+| [#28](https://github.com/trionnemesis/AgenticDef/issues/28) — replay helpers separate from CLI | Merged; compatibility retained | [#31](https://github.com/trionnemesis/AgenticDef/pull/31), `agenticdef.replay` |
+| [#29](https://github.com/trionnemesis/AgenticDef/issues/29) — import-cached schemas not pinned to live-run SHA | Open; reproduced offline, not fixed | PR #22's late review and #29 reproduction |
 
 Historical local check at `c2af276` (not a current-main measurement): `pytest` 132 passed from a clean `.[dev]`
 install; `replay scenarios --all` S01–S08 all `passed: true`.
@@ -58,6 +65,16 @@ integration and evaluator behavior, not real-model accuracy or resistance to
 injected evidence. See [verification](verification.md).
 
 ## Phase 2 — decision gate before v0.3 / v0.3 前的決策關卡
+
+**Next pre-live work item: #29.** The current provenance check verifies loaded
+Python files but omits import-cached JSON schemas. A clean schema-only revision
+change can pass while validators retain the previous contracts. Pin the loaded
+schema snapshots to the same revision and prove refusal before transport
+construction. This is a separate fix from the behavior-preserving #27/#28
+refactors. Do not treat their green CI as resolving it or run the paid D8 smoke
+before addressing it. The original investigation core and independent oracle
+remain the design boundaries; see [#26](https://github.com/trionnemesis/AgenticDef/issues/26)
+for the module responsibility matrix and work orders.
 
 SPEC v0.2 permits the next version to add **one live read-only GCP/GKE
 evidence adapter**, and only after the v0.2 gates pass. No v0.3 design is
