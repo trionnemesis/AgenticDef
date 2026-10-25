@@ -21,10 +21,10 @@ from agenticdef.adapters.clock import SystemClock
 from agenticdef.adapters.fixture_tools import FixtureTools
 from agenticdef.adapters.repository import JsonRepository
 from agenticdef.application.investigate import Investigator
-from agenticdef.cli import assert_expected
 from agenticdef.domain.contracts import validate
 from agenticdef.domain.errors import ContractError
 from agenticdef.domain.runtime import TERMINAL
+from agenticdef.replay import assert_expected
 
 from . import oracle
 from .baselines import BASELINE_PROVENANCES

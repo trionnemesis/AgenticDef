@@ -11,8 +11,8 @@ import re
 
 from jsonschema import Draft202012Validator, FormatChecker
 
-from agenticdef.cli import load
 from agenticdef.domain.contracts import canonical
+from agenticdef.replay import load
 
 SCHEMA_DIR = Path(__file__).resolve().parent / "schemas"
 CASE_ID = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")

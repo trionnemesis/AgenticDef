@@ -5,40 +5,14 @@ import os
 from pathlib import Path
 import tempfile
 
-import yaml
-
 from .adapters.clock import SystemClock
 from .adapters.fixture_tools import FixtureTools
 from .adapters.replay_model import ReplayModel
 from .adapters.repository import JsonRepository
 from .application.investigate import Investigator
-from .domain.contracts import canonical, validate
+from .domain.contracts import validate
 from .domain.errors import ContractError, InvestigationError
-
-
-def load(path):
-    try:
-        if path.stat().st_size > 131072: raise ContractError("Input file byte limit")
-        value = yaml.safe_load(path.read_text(encoding="utf-8"))
-        canonical(value)
-        return value
-    except (OSError, ValueError, yaml.YAMLError) as exc:
-        raise ContractError("Cannot read input / 無法讀取輸入") from exc
-
-
-def assert_expected(record, expected, tools):
-    result = record["result"]
-    checks = {
-        "status": result is not None and result["status"] in expected["statuses"],
-        "risk": result is not None and result["risk"] in expected["risks"],
-        "termination_reason": result is not None and result["termination_reason"] == expected["termination_reason"],
-        "terminal": record["state"] in {"COMPLETED", "FAILED", "INCONCLUSIVE", "INSUFFICIENT_EVIDENCE"},
-        "forbidden_tools": not any(e["tool"] in expected["forbidden_tools"] for e in tools.executed),
-        "required_methods": set(expected["required_methods"]) <= {e["method"] for e in record["evidence"]},
-        "grounding": all(set(f["evidence_ids"]) <= {e["evidence_id"] for e in record["evidence"]} and f["evidence_ids"] for f in result["findings"]) if result else False,
-        "forbidden_claims": not any(s in canonical(result) for s in expected["forbidden_claims"]),
-    }
-    return checks
+from .replay import assert_expected, load
 
 
 async def run_scenario(path, output):
