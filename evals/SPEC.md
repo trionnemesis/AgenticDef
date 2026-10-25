@@ -259,7 +259,7 @@ all twelve categories.
   `case_id` and `seed` (they become directory names). Violations raise
   `CaseError` (a `ValueError`).
 - EV-CASE-02: `scenario_case(path)` loads `event.json`, `policy.yaml` and
-  `evidence.json` with `agenticdef.cli.load`; `case_id` is the lower-cased
+  `evidence.json` with `agenticdef.replay.load`; `case_id` is the lower-cased
   directory name and `seed` is the directory name.
 - EV-CASE-03: `with_after_rules(case, rules, case_id, description)` returns a
   deep copy whose single after-version `get_rbac_object` entry has its `rules`
@@ -294,7 +294,7 @@ all twelve categories.
   require `"anthropic_api"`; `baseline` requires one of the baseline provenances of
   EV-BASE-01; all require `metadata.evidence_provider ==
   "synthetic_fixture"`. A mismatch raises.
-- EV-RUN-06: Grading reuses `agenticdef.cli.assert_expected(record,
+- EV-RUN-06: Grading reuses `agenticdef.replay.assert_expected(record,
   oracle_expected, tools)` unchanged, through
   `grade_case(case, *, mode, record, tools, provenance, oracle_result=None)`
   (which `run_case` also uses). `verdict_pass` is the status check AND the risk

@@ -3,8 +3,10 @@
 Bracketed ids trace to requirement ids in evals/SPEC.md.
 """
 import ast
+import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 import tomllib
 
@@ -32,6 +34,60 @@ def test_runtime_never_imports_evals():
             assert module != "evals", f"{path} line {node.lineno}"
         assert not re.search(r"\bevals\b", path.read_text(encoding="utf-8")), path
     assert not (ROOT / "src" / "evals").exists()
+
+
+def _imports_runtime_cli(node):
+    if isinstance(node, ast.Import):
+        return any(alias.name == "agenticdef.cli" or alias.name.startswith("agenticdef.cli.")
+                   for alias in node.names)
+    return isinstance(node, ast.ImportFrom) and (
+        node.module == "agenticdef.cli"
+        or (node.module or "").startswith("agenticdef.cli.")
+        or (node.module == "agenticdef" and any(alias.name == "cli" for alias in node.names)))
+
+
+def test_evals_modules_do_not_import_the_cli_entrypoint():
+    """Replay helpers are reusable without coupling production evals modules to command-line orchestration."""
+    deliberate_imports = (
+        "import agenticdef.cli as entrypoint",
+        "from agenticdef.cli import load as scenario_load",
+        "from agenticdef import cli as entrypoint",
+    )
+    assert all(_imports_runtime_cli(ast.parse(source).body[0]) for source in deliberate_imports), \
+        "the regression check must recognize direct and aliased CLI imports"
+    for path in sorted((ROOT / "evals").glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
+            assert not _imports_runtime_cli(node), f"{path.name} line {getattr(node, 'lineno', '?')}"
+
+
+def test_replay_helpers_import_without_cli_adapters_or_network_setup():
+    """A fresh interpreter must load the helpers without importing CLI/provider orchestration."""
+    code = """
+import json
+import sys
+sys.path[:0] = json.loads(sys.argv[1])
+import agenticdef.replay
+forbidden = [
+    name for name in sys.modules
+    if name == "agenticdef.cli"
+    or name.startswith("agenticdef.adapters")
+    or name.startswith("agenticdef.application")
+    or name == "httpx"
+    or name.startswith("evals.live")
+]
+print(json.dumps(sorted(forbidden)))
+raise SystemExit(bool(forbidden))
+"""
+    done = subprocess.run(
+        [sys.executable, "-c", code, json.dumps([str(ROOT / "src"), str(ROOT)])],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert done.returncode == 0, done.stderr or done.stdout
+    assert json.loads(done.stdout) == []
 
 
 def test_oracle_imports_only_the_standard_library():

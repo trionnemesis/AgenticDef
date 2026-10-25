@@ -12,11 +12,29 @@ from agenticdef.adapters.fixture_tools import FixtureTools
 from agenticdef.adapters.replay_model import ReplayModel
 from agenticdef.adapters.repository import JsonRepository
 from agenticdef.application.investigate import Investigator
+from agenticdef import cli, replay
 from agenticdef.cli import assert_expected, load, main, run_scenario
 from agenticdef.domain.contracts import validate
 from agenticdef.domain.errors import ContractError
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_cli_preserves_replay_helper_exports():
+    assert cli.load is replay.load
+    assert cli.assert_expected is replay.assert_expected
+
+
+def test_replay_loader_preserves_input_size_limit(tmp_path):
+    path = tmp_path / "oversized.yaml"
+    path.write_text("x" * 131073, encoding="utf-8")
+    with pytest.raises(ContractError, match="^Input file byte limit$"):
+        replay.load(path)
+
+
+def test_replay_loader_preserves_read_error(tmp_path):
+    with pytest.raises(ContractError, match="^Cannot read input"):
+        replay.load(tmp_path / "missing.yaml")
 
 
 def s01_record(tmp_path):
