@@ -15,6 +15,8 @@ Validate the event before any model call. Load a defensive copy of trusted polic
 
 Transition through RECEIVED, VALIDATED, POLICY_LOADED and INVESTIGATING. Model calls propose `tool_request` or `finish`. A tool request passes action schema, fixed registry, exact argument shape and scope membership before the adapter is invoked. A permitted tool returns at most one envelope. Normalize it, derive an evidence identity, persist its body, and audit the accepted reference.
 
+The domain owns a closed, immutable catalog of exactly four read-only capabilities. Each descriptor fixes its argument names and trusted policy scope: event, subject, and approval reads match one identifier in their corresponding scope list, while an RBAC read matches the complete kind/namespace/name/version object (including an empty namespace for a ClusterRole). The catalog has no registration or discovery API; the investigator dispatch and model adapter serialization consume the same fixed surface. The typed evidence port, fixture adapter, and bundled JSON schemas remain independent normative boundaries checked against that catalog.
+
 The final `produce_result` call consumes model budget. Validate its draft, persist the candidate in audit, then verify all findings reference existing evidence. Conclusive results require the exact change event, before/after role versions, subject bindings and approval request. Save a schema-valid result, then atomically mark the terminal record. Do not return success if persistence fails.
 
 ## Budget semantics

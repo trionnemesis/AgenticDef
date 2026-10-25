@@ -8,9 +8,9 @@ import json
 
 import httpx
 
+from ..domain.capabilities import CAPABILITY_BY_NAME
 from ..domain.contracts import SCHEMAS, canonical, validate
 from ..domain.errors import ModelError
-from ..domain.runtime import TOOL_ARGUMENTS
 
 ENDPOINT = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -46,7 +46,7 @@ class AnthropicModel:
             "model": self.model, "max_tokens": MAX_TOKENS, "system": SYSTEM,
             "messages": [{"role": "user", "content": canonical({
                 "task": task,
-                "allowed_tools": {name: list(TOOL_ARGUMENTS[name]) for name in allowed_tools},
+                "allowed_tools": {name: list(CAPABILITY_BY_NAME[name].arguments) for name in allowed_tools},
                 "output_schema": SCHEMAS[schema + ".schema.json"],
                 "untrusted_investigation_data": context,
             })}],

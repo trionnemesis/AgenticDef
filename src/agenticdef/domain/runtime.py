@@ -1,8 +1,8 @@
 """No model, network, vendor, or persistence dependencies."""
 from copy import deepcopy
 from hashlib import sha256
-from types import MappingProxyType
 
+from .capabilities import CAPABILITY_BY_NAME, TOOL_ARGUMENTS
 from .contracts import canonical, validate
 from .errors import BudgetError, ContractError, PolicyError, ScopeError, ToolNotAllowedError
 
@@ -13,12 +13,6 @@ TRANSITIONS = {
     "POLICY_LOADED": {"INVESTIGATING", "FAILED"},
     "INVESTIGATING": set(TERMINAL),
 }
-TOOL_ARGUMENTS = MappingProxyType({
-    "get_change_event": ("event_id",),
-    "get_rbac_object": ("kind", "namespace", "name", "version"),
-    "get_subject_bindings": ("subject_id",),
-    "get_approval_record": ("change_id",),
-})
 
 
 def transition(current, target):
@@ -52,18 +46,18 @@ class Policy:
         return event_id in self._value["resource_scope"]["event_ids"]
 
     def authorize(self, tool, arguments):
-        if tool not in TOOL_ARGUMENTS or tool not in self.allowed_tools:
+        capability = CAPABILITY_BY_NAME.get(tool)
+        if capability is None or tool not in self.allowed_tools:
             raise ToolNotAllowedError("Unregistered or disallowed tool / 工具未獲允許")
-        if not isinstance(arguments, dict) or set(arguments) != set(TOOL_ARGUMENTS[tool]):
+        if not isinstance(arguments, dict) or set(arguments) != set(capability.arguments):
             raise ContractError("Tool argument shape / 工具參數格式錯誤")
         if any(not isinstance(v, str) or len(v) > 128 or (not v and k != "namespace") for k, v in arguments.items()):
             raise ContractError("Invalid tool identifier / 無效工具識別碼")
         scope = self._value["resource_scope"]
-        if tool == "get_rbac_object":
-            permitted = arguments in scope["rbac_objects"]
+        if capability.scope_identifier is None:
+            permitted = arguments in scope[capability.scope_field]
         else:
-            key = TOOL_ARGUMENTS[tool][0]
-            permitted = arguments[key] in scope[{"event_id": "event_ids", "subject_id": "subject_ids", "change_id": "change_ids"}[key]]
+            permitted = arguments[capability.scope_identifier] in scope[capability.scope_field]
         if not permitted:
             raise ScopeError("Resource outside trusted scope / 資源超出授權範圍")
 

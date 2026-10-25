@@ -1,6 +1,7 @@
 from copy import deepcopy
 from hashlib import sha256
 
+from .capabilities import CAPABILITY_BY_NAME
 from .contracts import canonical, validate
 from .errors import GroundingError, ToolExecutionError
 
@@ -51,7 +52,7 @@ def validate_grounding(draft, ledger, event=None):
     if draft["status"] in {"confirmed_suspicious", "likely_benign"}:
         if not draft["findings"] or draft["missing_evidence"]:
             raise GroundingError("Conclusive result requires findings and complete evidence")
-        required = {"get_change_event", "get_rbac_object", "get_subject_bindings", "get_approval_record"}
+        required = set(CAPABILITY_BY_NAME)
         if not required <= {e["method"] for e in ledger.items.values()}:
             raise GroundingError("Required investigation evidence not collected")
         if event is not None:
